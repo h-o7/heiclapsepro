@@ -1,0 +1,6 @@
+{
+  "name": "Timelapse & HEIC Converter",
+  "description": "Create stunning photo timelapses and batch convert Samsung HEIC photos to high-quality JPGs directly in your browser.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
