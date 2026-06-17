@@ -20,7 +20,7 @@ import HEICConverter from './components/HEICConverter';
 import { TimelineFrame, ActiveTab } from './types';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<ActiveTab>('timelapse');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('converter');
   const [frames, setFrames] = useState<TimelineFrame[]>([]);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
 
@@ -55,13 +55,25 @@ export default function App() {
                 </span>
               </h1>
               <p className="text-[11px] text-slate-400 font-medium">
-                Samsung HEIC folder transcoder and premium browser timelapse builder
+                HEIC folder transcoder and premium browser timelapse builder
               </p>
             </div>
           </div>
 
           {/* Single-screen tab switches */}
           <div className="flex bg-slate-100 border border-slate-200/80 p-1 rounded-2xl shadow-inner">
+            <button
+              onClick={() => setActiveTab('converter')}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all cursor-pointer ${
+                activeTab === 'converter'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200'
+                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+              }`}
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>HEIC Batch Converter</span>
+            </button>
+
             <button
               onClick={() => setActiveTab('timelapse')}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all cursor-pointer ${
@@ -81,18 +93,6 @@ export default function App() {
                   {frames.length}
                 </span>
               )}
-            </button>
-
-            <button
-              onClick={() => setActiveTab('converter')}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all cursor-pointer ${
-                activeTab === 'converter'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200'
-                  : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
-              }`}
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>Samsung HEIC Batch Converter</span>
             </button>
           </div>
         </div>
@@ -121,7 +121,7 @@ export default function App() {
 
           </div>
         ) : (
-          /* SECTION 2: Decoupled Samsung HEIC to JPG Batch transcoder */
+          /* SECTION 2: Decoupled HEIC to JPG Batch transcoder */
           <HEICConverter 
             onAddToTimelapse={handleAddConvertedToTimelapse}
             timelapseFrameCount={frames.length}
@@ -135,7 +135,7 @@ export default function App() {
           <div className="flex items-center gap-3">
             <Info className="w-5 h-5 text-slate-400" />
             <p className="text-[11px] text-slate-500 leading-relaxed max-w-xl">
-              <strong className="text-slate-700">100% Browser Sealed Privacy Guarantee:</strong> No images or metadata details are processed on external servers. All custom Samsung HEIC transcodes, aspect orientations, storyboard timelines, and video compiles are run completely locally inside browser storage context via high performance web workers, safeguarding original quality and bandwidth.
+              <strong className="text-slate-700">100% Browser Sealed Privacy Guarantee:</strong> No images or metadata details are processed on external servers. All custom HEIC transcodes, aspect orientations, storyboard timelines, and video compiles are run completely locally inside browser storage context via high performance web workers, safeguarding original quality and bandwidth.
             </p>
           </div>
           <div className="flex items-center gap-4 text-xs font-mono text-slate-400">

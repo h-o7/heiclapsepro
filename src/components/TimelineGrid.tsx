@@ -66,7 +66,7 @@ export default function TimelineGrid({ frames, setFrames, currentIndex, setCurre
         let finalUrl = '';
 
         if (isHeic) {
-          // Convert Samsung / iOS HEIC on-the-fly
+          // Convert HEIC on-the-fly
           finalBlob = await convertHEICtoJPG(file);
           finalUrl = URL.createObjectURL(finalBlob);
         } else {

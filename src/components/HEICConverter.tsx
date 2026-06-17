@@ -16,11 +16,12 @@ import {
   Loader2, 
   FolderArchive,
   ArrowRight,
-  Sparkles
+  Sparkles,
+  Scale
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { HEICFile, TimelineFrame } from '../types';
-import { convertHEICtoJPG, getImageDimensions } from '../utils/heic';
+import { convertHEICtoJPG, getImageDimensions, resizeImage } from '../utils/heic';
 
 interface HEICConverterProps {
   onAddToTimelapse: (frames: Omit<TimelineFrame, 'id'>[]) => void;
@@ -33,6 +34,13 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
   const [isConvertingAll, setIsConvertingAll] = useState<boolean>(false);
   const [conversionIndex, setConversionIndex] = useState<number>(0);
   const [isZipping, setIsZipping] = useState<boolean>(false);
+  
+  // Resizing Controls
+  const [resizeEnabled, setResizeEnabled] = useState<boolean>(false);
+  const [resizeWidth, setResizeWidth] = useState<number>(1920);
+  const [resizeHeight, setResizeHeight] = useState<number>(1080);
+  const [resizeModeFit, setResizeModeFit] = useState<boolean>(true);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Drag over states
@@ -100,7 +108,19 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
 
     try {
       const targetBlob = targetFile.file;
-      const convertedBlob = await convertHEICtoJPG(targetBlob, customQuality ?? quality);
+      let convertedBlob = await convertHEICtoJPG(targetBlob, customQuality ?? quality);
+
+      // Perform Resizing if enabled
+      if (resizeEnabled && resizeWidth > 0 && resizeHeight > 0) {
+        convertedBlob = await resizeImage(
+          convertedBlob,
+          resizeWidth,
+          resizeHeight,
+          resizeModeFit,
+          customQuality ?? quality
+        );
+      }
+
       const convertedUrl = URL.createObjectURL(convertedBlob);
 
       setFiles((prev) =>
@@ -267,13 +287,13 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
         </div>
         <div className="relative z-10 max-w-2xl">
           <h2 className="text-xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
-            Samsung HEIC Batch Converter
+            HEIC Batch Converter
             <span className="text-[10px] bg-indigo-50 text-indigo-600 font-mono font-bold px-2 py-0.5 rounded border border-indigo-100">
               Folder Transcoder
             </span>
           </h2>
           <p className="text-slate-500 text-sm mt-2 leading-relaxed">
-            High-efficiency HEIC formatted photos taken by Samsung and iOS mobile devices cannot be natively viewed inside core web browsers. Drop your raw folders and files here to transcode them into highly polished, universal JPEGs locally in parallel, without zero-exposure server leakage.
+            High-efficiency HEIC formatted photos taken by modern mobile devices cannot be natively viewed inside core web browsers. Drop your raw folders and files here to transcode them into highly polished, universal JPEGs locally in parallel, without zero-exposure server leakage.
           </p>
         </div>
       </div>
@@ -307,7 +327,7 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
             </div>
 
             <p className="text-slate-800 font-bold text-center">
-              Drag & drop Samsung HEIC photos or foldered lists here
+              Drag & drop HEIC photos or foldered lists here
             </p>
             <p className="text-slate-400 text-xs text-center mt-1">
               Supports bulk selection of raw HEIC files (`.heic` or `.heif`)
@@ -385,6 +405,92 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
             </div>
           </div>
 
+          {/* Image Resizing Options */}
+          <div className="border-t border-slate-100 pt-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={resizeEnabled}
+                  onChange={(e) => setResizeEnabled(e.target.checked)}
+                  disabled={isConvertingAll}
+                  className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                />
+                <span className="flex items-center gap-1">
+                  <Scale className="w-3.5 h-3.5 text-indigo-600" />
+                  Enable Resizing
+                </span>
+              </label>
+            </div>
+
+            {resizeEnabled && (
+              <div className="space-y-3 bg-slate-50 p-3 rounded-xl border border-slate-100 animate-fadeIn">
+                {/* Resize Mode */}
+                <div className="space-y-1">
+                  <span className="text-[10px] uppercase font-mono font-bold text-slate-450">Resizing Mode</span>
+                  <div className="flex bg-slate-200/65 p-0.5 rounded-lg text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setResizeModeFit(true)}
+                      className={`flex-1 py-1 text-center font-semibold rounded-md transition-all ${
+                        resizeModeFit
+                          ? 'bg-white text-slate-800 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      Fit (Ratio)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setResizeModeFit(false)}
+                      className={`flex-1 py-1 text-center font-semibold rounded-md transition-all ${
+                        !resizeModeFit
+                          ? 'bg-white text-slate-800 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      Stretch (Exact)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Dimensions inputs */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono text-slate-500 font-bold block">Width (px)</label>
+                    <input
+                      type="number"
+                      min="100"
+                      max="10000"
+                      value={resizeWidth}
+                      onChange={(e) => setResizeWidth(Math.max(100, parseInt(e.target.value) || 0))}
+                      disabled={isConvertingAll}
+                      className="w-full px-2 py-1 text-xs text-slate-800 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-mono text-slate-500 font-bold block">Height (px)</label>
+                    <input
+                      type="number"
+                      min="100"
+                      max="10000"
+                      value={resizeHeight}
+                      onChange={(e) => setResizeHeight(Math.max(100, parseInt(e.target.value) || 0))}
+                      disabled={isConvertingAll}
+                      className="w-full px-2 py-1 text-xs text-slate-800 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                </div>
+                
+                <p className="text-[9px] text-slate-400 font-mono leading-tight">
+                  {resizeModeFit
+                    ? '💡 Aspect ratio is safely maintained. Output fits within these bounds.'
+                    : '⚠ Output is forced exactly to target pixels, stretching if needed.'}
+                </p>
+              </div>
+            )}
+          </div>
+
           {/* Operations stack */}
           <div className="space-y-3 pt-4 border-t border-slate-100">
             <button
@@ -454,6 +560,26 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
             <span className="text-xs text-slate-500 font-bold tracking-wider uppercase">Conversion Queue ({files.length})</span>
             <span className="text-[10px] text-slate-400 font-mono">Click preview frame to export single JPEG files</span>
           </div>
+
+          {errorCount > 0 && (
+            <div className="mb-4 bg-rose-50/50 border border-rose-150 rounded-xl p-4 flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-rose-600 flex-shrink-0 mt-0.5 animate-pulse" />
+              <div className="text-xs text-rose-800 space-y-1">
+                <p className="font-bold">Some HEIC photos failed to transcode</p>
+                <p className="text-rose-700 leading-relaxed">
+                  Web-based engines (including browser compatibility modes used by Electron) are powered by standard WebAssembly decoders which only support standard <strong>8-bit HEIC files</strong>. High Dynamic Range (<strong>10-bit HDR, Apple ProRAW HDR, or Samsung HDR10+</strong>) captures cannot be fully decoded in-browser.
+                </p>
+                <p className="font-medium text-[11px] pt-1">
+                  💡 <strong>Recommended Workarounds:</strong>
+                </p>
+                <ul className="list-disc pl-4 space-y-1 mt-0.5 font-normal text-rose-700">
+                  <li><strong>For Samsung Galaxy:</strong> Go to Camera Settings ➔ Advanced picture options ➔ Toggle off <strong>"HDR10+ pictures / High bit-depth HEIF"</strong>.</li>
+                  <li><strong>For iPhone/iOS:</strong> Go to Settings ➔ Camera ➔ Formats ➔ Select <strong>"Most Compatible"</strong> (captures in JPEG) or disable <strong>Apple ProRAW / Auto-HDR</strong> high-depth capture.</li>
+                  <li><strong>Alternative:</strong> Convert high-bitrate photos using native tools (such as Preview on Mac or Photos on Windows) first, then import standard files.</li>
+                </ul>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
             {files.map((fileItem) => (

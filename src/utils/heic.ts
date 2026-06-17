@@ -52,6 +52,7 @@ export async function convertHEICtoJPG(
 ): Promise<Blob> {
   const heic2any = await loadHeic2Any();
 
+  // Try standard conversion first
   try {
     const response = await heic2any({
       blob,
@@ -60,13 +61,128 @@ export async function convertHEICtoJPG(
     });
 
     if (Array.isArray(response)) {
-      return response[0];
+      if (response.length > 0) {
+        return response[0];
+      }
+      throw new Error('Empty response returned from converter.');
     }
     return response;
   } catch (err: any) {
-    console.error('HEIC conversion error: ', err);
-    throw new Error(err?.message || 'HEIC decoding failed. Ensure it is a valid Samsung or iOS HEIC photo.');
+    const errMsg = err?.message || String(err);
+    console.warn('Standard HEIC conversion failed, retrying with multiple: true...', errMsg);
+    
+    // Automatically retry with multiple: true in case it is a multi-frame container,
+    // burst photo, portrait depth-map photo, or live image representation.
+    try {
+      const response = await heic2any({
+        blob,
+        toType: 'image/jpeg',
+        quality: quality,
+        multiple: true,
+      });
+
+      if (Array.isArray(response)) {
+        if (response.length > 0) {
+          return response[0];
+        }
+        throw new Error('Multi-frame converter returned an empty list.');
+      }
+      if (response) {
+        return response;
+      }
+      throw new Error('Empty response.');
+    } catch (retryErr: any) {
+      const retryErrMsg = retryErr?.message || String(retryErr);
+      console.error('HEIC multi-frame conversion retry also failed:', retryErrMsg);
+
+      // Analyze the error message to provide a highly descriptive diagnostic report
+      let diagnosis = 'HEIC decoding failed.';
+      
+      const isBitDepth = 
+        retryErrMsg.toLowerCase().includes('bit-depth') || 
+        retryErrMsg.toLowerCase().includes('bitdepth') ||
+        retryErrMsg.toLowerCase().includes('depth') ||
+        retryErrMsg.toLowerCase().includes('format') ||
+        retryErrMsg.toLowerCase().includes('unsupported') ||
+        retryErrMsg.toLowerCase().includes('codec') ||
+        retryErrMsg.toLowerCase().includes('null') ||
+        retryErrMsg.includes('libheif error') ||
+        retryErrMsg.includes('TypeError');
+
+      if (isBitDepth) {
+        diagnosis = 'Unsupported format (likely 10-bit HDR / ProRAW / HDR10+). Browser or web-based decoders only support standard 8-bit formats. To resolve, disable HDR10+/high bit-depth in camera settings, or convert via native OS tools.';
+      } else {
+        diagnosis = `HEIC decoding error: ${retryErrMsg}. Verify image integrity.`;
+      }
+      
+      throw new Error(diagnosis);
+    }
   }
+}
+
+/**
+ * Resizes an image Blob using Canvas API.
+ */
+export function resizeImage(
+  blob: Blob,
+  targetWidth: number,
+  targetHeight: number,
+  fit: boolean = true,
+  quality: number = 0.85
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.src = url;
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let newWidth = targetWidth;
+      let newHeight = targetHeight;
+
+      if (fit) {
+        const aspect = img.naturalWidth / img.naturalHeight;
+        const scale = Math.min(targetWidth / img.naturalWidth, targetHeight / img.naturalHeight);
+        
+        // Prevent upscale if original is smaller than target
+        if (scale < 1) {
+          newWidth = Math.round(img.naturalWidth * scale);
+          newHeight = Math.round(img.naturalHeight * scale);
+        } else {
+          newWidth = img.naturalWidth;
+          newHeight = img.naturalHeight;
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = newWidth;
+      canvas.height = newHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Failed to get canvas 2d context.'));
+        return;
+      }
+
+      // Draw image onto canvas
+      ctx.drawImage(img, 0, 0, newWidth, newHeight);
+
+      // Export canvas to Blob
+      canvas.toBlob(
+        (resizedBlob) => {
+          if (resizedBlob) {
+            resolve(resizedBlob);
+          } else {
+            reject(new Error('Failed to generate resized blob from canvas.'));
+          }
+        },
+        'image/jpeg',
+        quality
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Failed to load image for resizing.'));
+    };
+  });
 }
 
 /**
