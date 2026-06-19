@@ -50,6 +50,19 @@ export async function convertHEICtoJPG(
   blob: Blob,
   quality: number = 0.85
 ): Promise<Blob> {
+  // If running in Electron, use our native high-fidelity fast converter
+  const electronAPI = (typeof window !== 'undefined') ? (window as any).electronAPI : null;
+  if (electronAPI && typeof electronAPI.convertHeic === 'function') {
+    try {
+      const arrayBuffer = await blob.arrayBuffer();
+      const uint8Array = await electronAPI.convertHeic(arrayBuffer, quality);
+      return new Blob([uint8Array], { type: 'image/jpeg' });
+    } catch (err: any) {
+      console.error('Electron native converter failed, falling back to browser-based converter...', err);
+      // Fall through to standard heic2any
+    }
+  }
+
   const heic2any = await loadHeic2Any();
 
   // Try standard conversion first

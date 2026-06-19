@@ -1,9 +1,61 @@
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, shell, ipcMain } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
+import os from 'os';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import convert from 'heic-convert';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const execPromise = promisify(exec);
+
+// Register IPC handler to convert HEIC images natively
+ipcMain.handle('convert-heic', async (event, { arrayBuffer, quality }) => {
+  const inputBuffer = Buffer.from(arrayBuffer);
+  const qVal = typeof quality === 'number' ? quality : 0.85;
+
+  // 1. Try macOS native 'sips' converter if running on macOS for GPU-level color profile and HDR decoding
+  if (process.platform === 'darwin') {
+    const tempInputPath = path.join(os.tmpdir(), `input_${Date.now()}_${Math.random().toString(36).substring(7)}.heic`);
+    const tempOutputPath = path.join(os.tmpdir(), `output_${Date.now()}_${Math.random().toString(36).substring(7)}.jpg`);
+
+    try {
+      await fs.promises.writeFile(tempInputPath, inputBuffer);
+      const sipsQuality = Math.round(qVal * 100);
+      
+      // Use sips to natively convert HEIC to JPEG
+      await execPromise(`sips -s format jpeg -s formatOptions ${sipsQuality} "${tempInputPath}" --out "${tempOutputPath}"`);
+      const resultBuffer = await fs.promises.readFile(tempOutputPath);
+
+      // Clean up temp files asynchronously
+      fs.promises.unlink(tempInputPath).catch(() => {});
+      fs.promises.unlink(tempOutputPath).catch(() => {});
+
+      return new Uint8Array(resultBuffer);
+    } catch (sipsErr) {
+      console.warn('macOS native sips conversion failed, falling back to node heic-convert library...', sipsErr);
+      // Clean up temp files if created
+      fs.promises.unlink(tempInputPath).catch(() => {});
+      fs.promises.unlink(tempOutputPath).catch(() => {});
+    }
+  }
+
+  // 2. Fallback to heic-convert library inside Node.js 64-bit environment (unbound by browser memory restrictions)
+  try {
+    const outputBuffer = await convert({
+      buffer: inputBuffer,
+      format: 'JPEG',
+      quality: qVal
+    });
+    return new Uint8Array(outputBuffer);
+  } catch (err) {
+    console.error('Electron main process HEIC conversion failed:', err);
+    throw new Error(err?.message || String(err));
+  }
+});
 
 let mainWindow = null;
 

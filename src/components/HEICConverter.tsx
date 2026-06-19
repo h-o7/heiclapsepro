@@ -306,6 +306,7 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
+            onClick={handleSelectFilesClick}
             className={`flex flex-col items-center justify-center border-2 border-dashed rounded-2xl p-10 transition-all cursor-pointer ${
               isDragging
                 ? 'border-indigo-500 bg-indigo-50/20 scale-[0.99] shadow-inner'
@@ -334,7 +335,10 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
             </p>
 
             <button
-              onClick={handleSelectFilesClick}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleSelectFilesClick();
+              }}
               className="mt-6 px-5 py-2.5 bg-white text-slate-700 hover:text-slate-900 border border-slate-300 rounded-xl text-sm font-semibold transition-all shadow-sm cursor-pointer hover:bg-slate-50"
             >
               Select files from computer
@@ -566,13 +570,24 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
               <AlertCircle className="w-5 h-5 text-rose-600 flex-shrink-0 mt-0.5 animate-pulse" />
               <div className="text-xs text-rose-800 space-y-1">
                 <p className="font-bold">Some HEIC photos failed to transcode</p>
-                <p className="text-rose-700 leading-relaxed">
-                  Web-based engines (including browser compatibility modes used by Electron) are powered by standard WebAssembly decoders which only support standard <strong>8-bit HEIC files</strong>. High Dynamic Range (<strong>10-bit HDR, Apple ProRAW HDR, or Samsung HDR10+</strong>) captures cannot be fully decoded in-browser.
-                </p>
+                {typeof window !== 'undefined' && 'electronAPI' in window ? (
+                  <p className="text-rose-700 leading-relaxed">
+                    You are running inside the <strong>Electron Desktop App</strong> which utilizes optimized native background threads. If a photo still fails to load, the capture may be corrupted or in an unsupported high bit-depth format. Please verify the source file's integrity.
+                  </p>
+                ) : (
+                  <p className="text-rose-700 leading-relaxed">
+                    Browser-based environments are powered by standard WebAssembly decoders which only support standard <strong>8-bit HEIC files</strong>. High Dynamic Range (<strong>10-bit HDR, Apple ProRAW HDR, or Samsung HDR10+</strong>) captures cannot be fully decoded inside a standard web browser.
+                  </p>
+                )}
                 <p className="font-medium text-[11px] pt-1">
                   💡 <strong>Recommended Workarounds:</strong>
                 </p>
                 <ul className="list-disc pl-4 space-y-1 mt-0.5 font-normal text-rose-700">
+                  {!(typeof window !== 'undefined' && 'electronAPI' in window) && (
+                    <li className="text-indigo-950 font-semibold bg-indigo-50/70 p-1.5 rounded-lg border border-indigo-100 my-1">
+                      🚀 <strong>Use the Electron Desktop App</strong>: Pack and launch your local build (`npm run electron:start` or `npm run package`) which activates <strong>GPU-accelerated, native zero-memory-limit converters</strong> (including macOS `sips` integration) to bypass browser bounds completely!
+                    </li>
+                  )}
                   <li><strong>For Samsung Galaxy:</strong> Go to Camera Settings ➔ Advanced picture options ➔ Toggle off <strong>"HDR10+ pictures / High bit-depth HEIF"</strong>.</li>
                   <li><strong>For iPhone/iOS:</strong> Go to Settings ➔ Camera ➔ Formats ➔ Select <strong>"Most Compatible"</strong> (captures in JPEG) or disable <strong>Apple ProRAW / Auto-HDR</strong> high-depth capture.</li>
                   <li><strong>Alternative:</strong> Convert high-bitrate photos using native tools (such as Preview on Mac or Photos on Windows) first, then import standard files.</li>

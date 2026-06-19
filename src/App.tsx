@@ -138,8 +138,19 @@ export default function App() {
               <strong className="text-slate-700">100% Browser Sealed Privacy Guarantee:</strong> No images or metadata details are processed on external servers. All custom HEIC transcodes, aspect orientations, storyboard timelines, and video compiles are run completely locally inside browser storage context via high performance web workers, safeguarding original quality and bandwidth.
             </p>
           </div>
-          <div className="flex items-center gap-4 text-xs font-mono text-slate-400">
+          <div className="flex flex-wrap items-center gap-4 text-xs font-mono text-slate-400">
             <span>Powered by heic2any & JSZip</span>
+            <span>•</span>
+            <a 
+              href="https://github.com/h-o7/heiclapsepro" 
+              target="_blank" 
+              rel="noopener noreferrer" 
+              className="text-indigo-600 hover:text-indigo-700 hover:underline flex items-center gap-1.5 font-bold transition-colors cursor-pointer"
+              title="Need 10-bit HDR HEIC conversion? Get the Electron Desktop App from GitHub!"
+            >
+              <Github className="w-3.5 h-3.5 text-indigo-500" />
+              <span>10-Bit Converter (Desktop App)</span>
+            </a>
             <span>•</span>
             <span>Google AI Studio Applet</span>
           </div>

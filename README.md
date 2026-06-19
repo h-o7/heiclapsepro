@@ -8,6 +8,8 @@ A fully private, browser-sealed tool designed for batch converting HEIC formatte
 
 ### 1. HEIC Batch Converter
 *   **100% Client-Side Transcoding**: Every transcode runs entirely within your browser context via standard WebAssembly-powered decoders (`heic2any`). Your photos, metadata details, and privacy never leave your local machine (zero-exposure guarantee).
+*   **Electron Native 10-Bit & HDR Engine**: When run inside the desktop Electron shell, our custom IPC bridge is automatically used to run GPU-level high-bitrate conversion. It integrates macOS native `sips` command line tools or Node-level libde265 modules, bypassing the standard browser-based 8-bit memory constraints entirely.
+*   **Intelligent Drop Zone**: Easily drag-and-drop files or click anywhere inside the drop area to select standard HEIC/HEIF graphics from local directories.
 *   **Customizable Image Resizing**:
     *   **Fit (Ratio)**: Target width and height container boundary. Retains aspect ratio safely without distorting the layout.
     *   **Stretch (Exact)**: Forces the output to specific precise target pixels.
