@@ -146,23 +146,22 @@ export function resizeImage(
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(blob);
     const img = new Image();
-    img.src = url;
     img.onload = () => {
       URL.revokeObjectURL(url);
       let newWidth = targetWidth;
       let newHeight = targetHeight;
 
       if (fit) {
-        const aspect = img.naturalWidth / img.naturalHeight;
-        const scale = Math.min(targetWidth / img.naturalWidth, targetHeight / img.naturalHeight);
+        const aspect = (img.naturalWidth / img.naturalHeight) || 1;
+        const scale = Math.min(targetWidth / (img.naturalWidth || 1), targetHeight / (img.naturalHeight || 1)) || 1;
         
         // Prevent upscale if original is smaller than target
         if (scale < 1) {
-          newWidth = Math.round(img.naturalWidth * scale);
-          newHeight = Math.round(img.naturalHeight * scale);
+          newWidth = Math.round(img.naturalWidth * scale) || targetWidth;
+          newHeight = Math.round(img.naturalHeight * scale) || targetHeight;
         } else {
-          newWidth = img.naturalWidth;
-          newHeight = img.naturalHeight;
+          newWidth = img.naturalWidth || targetWidth;
+          newHeight = img.naturalHeight || targetHeight;
         }
       }
 
@@ -195,6 +194,7 @@ export function resizeImage(
       URL.revokeObjectURL(url);
       reject(new Error('Failed to load image for resizing.'));
     };
+    img.src = url;
   });
 }
 
@@ -204,12 +204,12 @@ export function resizeImage(
 export function getImageDimensions(url: string): Promise<{ width: number; height: number }> {
   return new Promise((resolve) => {
     const img = new Image();
-    img.src = url;
     img.onload = () => {
-      resolve({ width: img.naturalWidth, height: img.naturalHeight });
+      resolve({ width: img.naturalWidth || 1920, height: img.naturalHeight || 1080 });
     };
     img.onerror = () => {
       resolve({ width: 1920, height: 1080 }); // default fallback
     };
+    img.src = url;
   });
 }

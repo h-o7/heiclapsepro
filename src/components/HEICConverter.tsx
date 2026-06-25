@@ -17,7 +17,8 @@ import {
   FolderArchive,
   ArrowRight,
   Sparkles,
-  Scale
+  Scale,
+  Folder
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { HEICFile, TimelineFrame } from '../types';
@@ -34,6 +35,7 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
   const [isConvertingAll, setIsConvertingAll] = useState<boolean>(false);
   const [conversionIndex, setConversionIndex] = useState<number>(0);
   const [isZipping, setIsZipping] = useState<boolean>(false);
+  const [isSavingToFolder, setIsSavingToFolder] = useState<boolean>(false);
   
   // Resizing Controls
   const [resizeEnabled, setResizeEnabled] = useState<boolean>(false);
@@ -92,7 +94,7 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
     fileInputRef.current?.click();
   };
 
-  // Convert a single HEIC file
+  // Convert a single image file (HEIC or standard format)
   const convertSingleFile = async (id: string, customQuality?: number) => {
     const targetFile = files.find((f) => f.id === id);
     if (!targetFile) return;
@@ -108,17 +110,46 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
 
     try {
       const targetBlob = targetFile.file;
-      let convertedBlob = await convertHEICtoJPG(targetBlob, customQuality ?? quality);
+      const nameLower = targetFile.name.toLowerCase();
+      const isHeic = nameLower.endsWith('.heic') || nameLower.endsWith('.heif');
+      
+      let convertedBlob: Blob;
 
-      // Perform Resizing if enabled
-      if (resizeEnabled && resizeWidth > 0 && resizeHeight > 0) {
-        convertedBlob = await resizeImage(
-          convertedBlob,
-          resizeWidth,
-          resizeHeight,
-          resizeModeFit,
-          customQuality ?? quality
-        );
+      if (isHeic) {
+        // Step 1: Decode HEIC to JPG
+        convertedBlob = await convertHEICtoJPG(targetBlob, customQuality ?? quality);
+        
+        // Step 2: Resize if enabled
+        if (resizeEnabled && resizeWidth > 0 && resizeHeight > 0) {
+          convertedBlob = await resizeImage(
+            convertedBlob,
+            resizeWidth,
+            resizeHeight,
+            resizeModeFit,
+            customQuality ?? quality
+          );
+        }
+      } else {
+        // For non-HEIC / standard format files (JPG, PNG, WEBP, BMP, etc.):
+        // We ALWAYS transcode standard images to JPEG (applying custom quality and/or resizing)
+        if (resizeEnabled && resizeWidth > 0 && resizeHeight > 0) {
+          convertedBlob = await resizeImage(
+            targetBlob,
+            resizeWidth,
+            resizeHeight,
+            resizeModeFit,
+            customQuality ?? quality
+          );
+        } else {
+          // If resizing is disabled, transcode using natural/original size to compress to JPG with chosen quality
+          convertedBlob = await resizeImage(
+            targetBlob,
+            99999, // large upper bound
+            99999, // large upper bound
+            true,  // fit (retains original size since no upscale occurs)
+            customQuality ?? quality
+          );
+        }
       }
 
       const convertedUrl = URL.createObjectURL(convertedBlob);
@@ -176,7 +207,7 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
   const downloadSingle = (fileItem: HEICFile) => {
     if (!fileItem.convertedBlob || !fileItem.convertedUrl) return;
 
-    const newName = fileItem.name.replace(/\.(heic|heif)$/i, '') + '.jpg';
+    const newName = fileItem.name.replace(/\.[^.]+$/, '') + '.jpg';
     const link = document.createElement('a');
     link.href = fileItem.convertedUrl;
     link.download = newName;
@@ -193,7 +224,7 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
 
     successfulFiles.forEach((fileItem) => {
       if (fileItem.convertedBlob) {
-        const pureName = fileItem.name.replace(/\.(heic|heif)$/i, '') + '.jpg';
+        const pureName = fileItem.name.replace(/\.[^.]+$/, '') + '.jpg';
         zip.file(pureName, fileItem.convertedBlob);
       }
     });
@@ -216,6 +247,116 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
     }
   };
 
+  // Bulk Local Folder saving (Supports Electron Desktop app & Web File System Access API)
+  const handleSaveToFolder = async () => {
+    const successfulFiles = files.filter((f) => f.status === 'done' && f.convertedBlob);
+    if (successfulFiles.length === 0) return;
+
+    const electronAPI = (window as any).electronAPI;
+
+    // --- 1. Electron Desktop Environment ---
+    if (electronAPI) {
+      try {
+        setIsSavingToFolder(true);
+
+        // Let the user choose a target directory
+        const directory = await electronAPI.selectDirectory();
+        if (!directory) {
+          return; // Canceled by user
+        }
+
+        // Save each converted image file sequentially to minimize peak IPC memory usage
+        for (const fileItem of successfulFiles) {
+          if (!fileItem.convertedBlob) continue;
+          const pureName = fileItem.name.replace(/\.[^.]+$/, '') + '.jpg';
+          
+          // Read Blob as arrayBuffer
+          const arrayBuffer = await fileItem.convertedBlob.arrayBuffer();
+          
+          // Pass to native writer
+          const res = await electronAPI.saveFilesToDirectory(directory, [{
+            name: pureName,
+            arrayBuffer: new Uint8Array(arrayBuffer)
+          }]);
+
+          if (!res || !res.success) {
+            throw new Error(res?.error || 'Failed to write files to disk');
+          }
+        }
+
+        alert(`Successfully saved all ${successfulFiles.length} converted JPG photos natively into folder:\n${directory}`);
+      } catch (err: any) {
+        console.error('Local folder export failed:', err);
+        alert(`Folder export failed: ${err.message || String(err)}`);
+      } finally {
+        setIsSavingToFolder(false);
+      }
+      return;
+    }
+
+    // --- 2. Web Browser Environment with File System Access API ---
+    if (typeof window !== 'undefined' && 'showDirectoryPicker' in window) {
+      try {
+        setIsSavingToFolder(true);
+        
+        // Prompt user to select directory
+        const directoryHandle = await (window as any).showDirectoryPicker({
+          mode: 'readwrite',
+        });
+
+        let savedCount = 0;
+        for (const fileItem of successfulFiles) {
+          if (!fileItem.convertedBlob) continue;
+          const pureName = fileItem.name.replace(/\.[^.]+$/, '') + '.jpg';
+          
+          // Create a new file handle inside selected directory
+          const fileHandle = await directoryHandle.getFileHandle(pureName, { create: true });
+          
+          // Create writeable stream and write Blob
+          const writable = await fileHandle.createWritable();
+          await writable.write(fileItem.convertedBlob);
+          await writable.close();
+          savedCount++;
+        }
+
+        alert(`Successfully exported ${savedCount} converted photos directly into your selected local folder!`);
+      } catch (err: any) {
+        if (err.name === 'AbortError') {
+          console.log('User canceled directory choice.');
+          return;
+        }
+        console.error('Web folder export failed:', err);
+        alert(`Folder export failed: ${err.message || String(err)}. You can use the "Download All (ZIP)" button as a fallback.`);
+      } finally {
+        setIsSavingToFolder(false);
+      }
+      return;
+    }
+
+    // --- 3. Traditional Browser Fallback (e.g. Firefox, Safari) ---
+    try {
+      setIsSavingToFolder(true);
+      if (confirm(`Your browser doesn't support picking folders directly. Would you like to download all ${successfulFiles.length} converted photos individually to your standard Downloads directory?`)) {
+        for (const fileItem of successfulFiles) {
+          if (!fileItem.convertedBlob) continue;
+          const pureName = fileItem.name.replace(/\.[^.]+$/, '') + '.jpg';
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(fileItem.convertedBlob);
+          link.download = pureName;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          // Keep a tiny delay to avoid browser choking on rapid parallel downloads
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      }
+    } catch (err: any) {
+      console.error('Individual fallback conversion failed:', err);
+    } finally {
+      setIsSavingToFolder(false);
+    }
+  };
+
   // Pipeline converted images to the Timelapse Timeline
   const sendToTimelapse = async () => {
     const successfulFiles = files.filter((f) => f.status === 'done' && f.convertedBlob && f.convertedUrl);
@@ -227,7 +368,7 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
       if (f.convertedBlob && f.convertedUrl) {
         const dimensions = await getImageDimensions(f.convertedUrl);
         framesToInject.push({
-          name: f.name.replace(/\.(heic|heif)$/i, '') + '.jpg',
+          name: f.name.replace(/\.[^.]+$/, '') + '.jpg',
           size: f.convertedBlob.size,
           url: f.convertedUrl,
           blob: f.convertedBlob,
@@ -281,36 +422,36 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
   return (
     <div className="space-y-6">
       {/* Dynamic Workspace Banner */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 relative overflow-hidden shadow-sm">
-        <div className="absolute top-0 right-0 p-6 opacity-10 pointer-events-none">
-          <Sparkles className="w-48 h-48 text-indigo-400" />
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 relative overflow-hidden shadow-sm">
+        <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
+          <Sparkles className="w-24 h-24 text-brand-400" />
         </div>
-        <div className="relative z-10 max-w-2xl">
-          <h2 className="text-xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
-            HEIC Batch Converter
-            <span className="text-[10px] bg-indigo-50 text-indigo-600 font-mono font-bold px-2 py-0.5 rounded border border-indigo-100">
-              Folder Transcoder
+        <div className="relative z-10 max-w-full">
+          <h2 className="text-sm font-bold text-slate-800 tracking-tight flex items-center gap-2">
+            Advanced Batch Photo Converter
+            <span className="text-[9px] bg-brand-50 text-brand-600 font-mono font-bold px-1.5 py-0.5 rounded border border-brand-100">
+              Folder Transcoder & Resizer
             </span>
           </h2>
-          <p className="text-slate-500 text-sm mt-2 leading-relaxed">
-            High-efficiency HEIC formatted photos taken by modern mobile devices cannot be natively viewed inside core web browsers. Drop your raw folders and files here to transcode them into highly polished, universal JPEGs locally in parallel, without zero-exposure server leakage.
+          <p className="text-slate-500 text-xs mt-1 leading-relaxed">
+            Transcode and resize your raw HEIC captures as well as standard images (JPG, PNG, WEBP, BMP) directly in your browser. All computations occur sandboxed on your local machine, avoiding unnecessary cloud exposures.
           </p>
         </div>
       </div>
 
       {/* Control Station Panel */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Dropzone & Loader */}
-        <div className="lg:col-span-3 space-y-4">
+        <div className="space-y-4">
           <div
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             onClick={handleSelectFilesClick}
-            className={`flex flex-col items-center justify-center border-2 border-dashed rounded-2xl p-10 transition-all cursor-pointer ${
+            className={`flex flex-col items-center justify-center border-2 border-dashed rounded-2xl p-6 transition-all cursor-pointer ${
               isDragging
-                ? 'border-indigo-500 bg-indigo-50/20 scale-[0.99] shadow-inner'
-                : 'border-slate-300 bg-white hover:bg-slate-50/50 hover:border-indigo-400 shadow-sm'
+                ? 'border-brand-500 bg-brand-50/20 scale-[0.99] shadow-inner'
+                : 'border-slate-300 bg-white hover:bg-slate-50/50 hover:border-brand-400 shadow-sm'
             }`}
           >
             <input
@@ -318,20 +459,20 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
               ref={fileInputRef}
               onChange={(e) => processUploadedFiles(e.target.files)}
               multiple
-              accept=".heic,.heif"
+              accept=".heic,.heif,.jpg,.jpeg,.png,.webp,.bmp"
               className="hidden"
               id="heic-input"
             />
             
-            <div className="p-4 bg-indigo-50 rounded-full border border-indigo-100 text-indigo-600 mb-4 transition-all">
-              <Upload className="w-10 h-10 text-indigo-600" />
+            <div className="p-3 bg-brand-50 rounded-full border border-brand-100 text-brand-600 mb-3 transition-all">
+              <Upload className="w-8 h-8 text-brand-600" />
             </div>
 
-            <p className="text-slate-800 font-bold text-center">
-              Drag & drop HEIC photos or foldered lists here
+            <p className="text-slate-800 text-sm font-bold text-center">
+              Drag & drop photos or folders here
             </p>
-            <p className="text-slate-400 text-xs text-center mt-1">
-              Supports bulk selection of raw HEIC files (`.heic` or `.heif`)
+            <p className="text-slate-400 text-[11px] text-center mt-0.5 max-w-xs leading-tight">
+              Supports bulk HEIC (`.heic`/`.heif`) and standard images (`.jpg`, `.jpeg`, `.png`, `.webp`, `.bmp`)
             </p>
 
             <button
@@ -339,7 +480,7 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
                 e.stopPropagation();
                 handleSelectFilesClick();
               }}
-              className="mt-6 px-5 py-2.5 bg-white text-slate-700 hover:text-slate-900 border border-slate-300 rounded-xl text-sm font-semibold transition-all shadow-sm cursor-pointer hover:bg-slate-50"
+              className="mt-4 px-4 py-2 bg-white text-slate-700 hover:text-slate-900 border border-slate-300 rounded-xl text-xs font-semibold transition-all shadow-sm cursor-pointer hover:bg-slate-50"
             >
               Select files from computer
             </button>
@@ -347,18 +488,18 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
 
           {/* Overall Converting progress and status */}
           {files.length > 0 && (
-            <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
-              <div className="flex flex-col gap-1 w-full md:w-auto">
-                <span className="text-xs text-slate-450 uppercase tracking-widest font-mono">Conversion Queue Status</span>
-                <span className="text-slate-700 text-sm font-semibold flex items-center gap-2">
-                  <span className="text-indigo-600 font-bold">{convertedCount}</span> converted
+            <div className="bg-white border border-slate-200 rounded-2xl p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm">
+              <div className="flex flex-col gap-0.5 w-full sm:w-auto">
+                <span className="text-[10px] text-slate-450 uppercase tracking-widest font-mono">Queue Status</span>
+                <span className="text-slate-700 text-xs font-semibold flex items-center gap-1.5">
+                  <span className="text-brand-600 font-bold">{convertedCount}</span> converted
                   <span className="text-slate-300 font-bold">•</span>
                   <span className="text-amber-600 font-semibold">{pendingCount}</span> remaining
                   {errorCount > 0 && (
                     <>
                       <span className="text-slate-300 font-bold">•</span>
                       <span className="text-rose-600 font-semibold flex items-center gap-1">
-                        <AlertCircle className="w-3.5 h-3.5" /> {errorCount} errors
+                        <AlertCircle className="w-3 h-3" /> {errorCount} errors
                       </span>
                     </>
                   )}
@@ -366,14 +507,14 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
               </div>
 
               {/* Graphical Master Slider Progress */}
-              <div className="flex-1 w-full md:max-w-md bg-slate-100 rounded-full h-2.5 overflow-hidden border border-slate-200">
+              <div className="flex-1 w-full sm:max-w-xs bg-slate-100 rounded-full h-2 overflow-hidden border border-slate-200">
                 <div 
-                  className="bg-indigo-600 h-full transition-all duration-300"
+                  className="bg-brand-600 h-full transition-all duration-300"
                   style={{ width: `${(convertedCount / files.length) * 100}%` }}
                 />
               </div>
 
-              <span className="text-slate-600 font-mono text-sm font-bold">
+              <span className="text-slate-600 font-mono text-xs font-bold">
                 {Math.round((convertedCount / files.length) * 100)}%
               </span>
             </div>
@@ -381,17 +522,17 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
         </div>
 
         {/* Configuration Column */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 h-fit space-y-6 shadow-sm">
-          <div className="flex items-center gap-2 border-b border-slate-100 pb-4">
-            <SlidersHorizontal className="w-4 h-4 text-indigo-600" />
-            <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Rendering Plan</h3>
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 h-fit space-y-4 shadow-sm">
+          <div className="flex items-center gap-2 border-b border-slate-100 pb-2.5">
+            <SlidersHorizontal className="w-3.5 h-3.5 text-brand-600" />
+            <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Rendering Plan</h3>
           </div>
 
           {/* Quality Slider Control */}
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <div className="flex justify-between text-xs font-semibold font-mono">
               <span className="text-slate-500">JPEG Quality</span>
-              <span className="text-indigo-600 font-bold">{Math.round(quality * 100)}%</span>
+              <span className="text-brand-600 font-bold">{Math.round(quality * 100)}%</span>
             </div>
             <input
               type="range"
@@ -401,16 +542,12 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
               value={quality}
               onChange={(e) => setQuality(parseFloat(e.target.value))}
               disabled={isConvertingAll}
-              className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+              className="w-full h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-brand-600"
             />
-            <div className="flex justify-between text-[10px] text-slate-400 font-mono">
-              <span>Optimized Compression</span>
-              <span>Maximum Density</span>
-            </div>
           </div>
 
           {/* Image Resizing Options */}
-          <div className="border-t border-slate-100 pt-4 space-y-3">
+          <div className="border-t border-slate-100 pt-3 space-y-2">
             <div className="flex items-center justify-between">
               <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer select-none">
                 <input
@@ -418,25 +555,25 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
                   checked={resizeEnabled}
                   onChange={(e) => setResizeEnabled(e.target.checked)}
                   disabled={isConvertingAll}
-                  className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                  className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 w-3.5 h-3.5 cursor-pointer"
                 />
                 <span className="flex items-center gap-1">
-                  <Scale className="w-3.5 h-3.5 text-indigo-600" />
+                  <Scale className="w-3.5 h-3.5 text-brand-600" />
                   Enable Resizing
                 </span>
               </label>
             </div>
 
             {resizeEnabled && (
-              <div className="space-y-3 bg-slate-50 p-3 rounded-xl border border-slate-100 animate-fadeIn">
+              <div className="space-y-2.5 bg-slate-50 p-2.5 rounded-xl border border-slate-100 animate-fadeIn">
                 {/* Resize Mode */}
-                <div className="space-y-1">
-                  <span className="text-[10px] uppercase font-mono font-bold text-slate-450">Resizing Mode</span>
-                  <div className="flex bg-slate-200/65 p-0.5 rounded-lg text-xs">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] uppercase font-mono font-bold text-slate-450">Mode:</span>
+                  <div className="flex bg-slate-200/65 p-0.5 rounded-lg text-[10px] w-36">
                     <button
                       type="button"
                       onClick={() => setResizeModeFit(true)}
-                      className={`flex-1 py-1 text-center font-semibold rounded-md transition-all ${
+                      className={`flex-1 py-0.5 text-center font-semibold rounded-md transition-all ${
                         resizeModeFit
                           ? 'bg-white text-slate-800 shadow-sm'
                           : 'text-slate-500 hover:text-slate-800'
@@ -447,21 +584,21 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
                     <button
                       type="button"
                       onClick={() => setResizeModeFit(false)}
-                      className={`flex-1 py-1 text-center font-semibold rounded-md transition-all ${
+                      className={`flex-1 py-0.5 text-center font-semibold rounded-md transition-all ${
                         !resizeModeFit
                           ? 'bg-white text-slate-800 shadow-sm'
                           : 'text-slate-500 hover:text-slate-800'
                       }`}
                     >
-                      Stretch (Exact)
+                      Stretch
                     </button>
                   </div>
                 </div>
 
                 {/* Dimensions inputs */}
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-mono text-slate-500 font-bold block">Width (px)</label>
+                  <div className="flex items-center justify-between gap-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1">
+                    <span className="text-[9px] font-mono text-slate-400 font-bold">W</span>
                     <input
                       type="number"
                       min="100"
@@ -469,11 +606,12 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
                       value={resizeWidth}
                       onChange={(e) => setResizeWidth(Math.max(100, parseInt(e.target.value) || 0))}
                       disabled={isConvertingAll}
-                      className="w-full px-2 py-1 text-xs text-slate-800 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      className="w-full text-right text-xs text-slate-800 focus:outline-none bg-transparent"
                     />
+                    <span className="text-[9px] font-mono text-slate-400">px</span>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-mono text-slate-500 font-bold block">Height (px)</label>
+                  <div className="flex items-center justify-between gap-1.5 bg-white border border-slate-200 rounded-lg px-2 py-1">
+                    <span className="text-[9px] font-mono text-slate-400 font-bold">H</span>
                     <input
                       type="number"
                       min="100"
@@ -481,76 +619,98 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
                       value={resizeHeight}
                       onChange={(e) => setResizeHeight(Math.max(100, parseInt(e.target.value) || 0))}
                       disabled={isConvertingAll}
-                      className="w-full px-2 py-1 text-xs text-slate-800 bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      className="w-full text-right text-xs text-slate-800 focus:outline-none bg-transparent"
                     />
+                    <span className="text-[9px] font-mono text-slate-400">px</span>
                   </div>
                 </div>
-                
-                <p className="text-[9px] text-slate-400 font-mono leading-tight">
-                  {resizeModeFit
-                    ? '💡 Aspect ratio is safely maintained. Output fits within these bounds.'
-                    : '⚠ Output is forced exactly to target pixels, stretching if needed.'}
-                </p>
               </div>
             )}
           </div>
 
-          {/* Operations stack */}
-          <div className="space-y-3 pt-4 border-t border-slate-100">
-            <button
-              onClick={handleConvertAll}
-              disabled={isConvertingAll || files.length === 0 || pendingCount === 0}
-              className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-100 disabled:text-slate-400 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-indigo-100 disabled:shadow-none"
-            >
-              {isConvertingAll ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin text-white" />
-                  <span>Converting ({conversionIndex}/{files.length})...</span>
-                </>
-              ) : (
-                <>
-                  <Play className="w-4 h-4 text-white fill-current" />
-                  <span>Convert {pendingCount > 0 ? pendingCount : 'All'} to JPG</span>
-                </>
-              )}
-            </button>
+          {/* Operations stack - Side-by-side Grids */}
+          <div className="space-y-2 pt-3 border-t border-slate-100">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={handleConvertAll}
+                disabled={isConvertingAll || files.length === 0 || pendingCount === 0}
+                className="py-2 px-3 bg-brand-600 border border-transparent hover:border-brand-200 hover:bg-brand-50 hover:text-black disabled:bg-slate-100 disabled:text-slate-400 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm disabled:shadow-none disabled:hover:border-transparent group"
+              >
+                {isConvertingAll ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-white flex-shrink-0 group-hover:text-black" />
+                    <span className="truncate">Conv. ({conversionIndex}/{files.length})</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-3.5 h-3.5 text-white fill-current flex-shrink-0 group-hover:text-black group-hover:fill-black" />
+                    <span className="truncate">Convert to JPG</span>
+                  </>
+                )}
+              </button>
 
-            {/* PIPELINE / TIMELAPSE INJECTION BUTTON */}
-            <button
-              onClick={sendToTimelapse}
-              disabled={convertedCount === 0 || isConvertingAll}
-              className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-100 disabled:text-slate-400 text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-emerald-100 disabled:shadow-none"
-            >
-              <ArrowRight className="w-4 h-4" />
-              <span>Import to Timeline ({convertedCount})</span>
-            </button>
+              <button
+                onClick={sendToTimelapse}
+                disabled={convertedCount === 0 || isConvertingAll}
+                className="py-2 px-3 bg-brand-600 border border-transparent hover:border-brand-200 hover:bg-brand-50 hover:text-black disabled:bg-slate-100 disabled:text-slate-400 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm disabled:shadow-none disabled:hover:border-transparent group"
+              >
+                <ArrowRight className="w-3.5 h-3.5 flex-shrink-0 text-white group-hover:text-black" />
+                <span className="truncate flex-1 text-center">Import to Timeline</span>
+              </button>
+            </div>
 
-            {/* DOWNLOAD ALL ZIP */}
-            <button
-              onClick={handleDownloadAllZip}
-              disabled={convertedCount === 0 || isConvertingAll || isZipping}
-              className="w-full py-2.5 px-4 bg-white hover:bg-slate-50 border border-slate-300 disabled:bg-slate-100 disabled:border-none disabled:text-slate-400 text-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
-            >
-              {isZipping ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
-                  <span>Generating ZIP...</span>
-                </>
-              ) : (
-                <>
-                  <FolderArchive className="w-4 h-4 text-indigo-650" />
-                  <span>Download ZIP ({convertedCount})</span>
-                </>
-              )}
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={handleSaveToFolder}
+                disabled={convertedCount === 0 || isConvertingAll || isSavingToFolder}
+                className="py-2 px-1.5 bg-brand-50 hover:bg-brand-100 disabled:bg-slate-50 disabled:text-slate-400 text-brand-700 border border-brand-150 rounded-xl text-[11px] font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer shadow-sm"
+                title={
+                  typeof window !== 'undefined' && 'electronAPI' in window
+                    ? 'Natively write individual JPG files directly into any local disk directory'
+                    : typeof window !== 'undefined' && 'showDirectoryPicker' in window
+                    ? 'Uses modern high-performance browser directory features to write JPGs directly to a local folder without a ZIP archive!'
+                    : 'Saves individual JPG files sequentially on your computer!'
+                }
+              >
+                {isSavingToFolder ? (
+                  <>
+                    <Loader2 className="w-3 h-3 animate-spin text-brand-600 flex-shrink-0" />
+                    <span className="truncate">Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Folder className="w-3 h-3 text-brand-600 flex-shrink-0" />
+                    <span className="truncate">Save to Folder</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                onClick={handleDownloadAllZip}
+                disabled={convertedCount === 0 || isConvertingAll || isZipping}
+                className="py-2 px-1.5 bg-white hover:bg-slate-50 border border-slate-300 disabled:bg-slate-100 disabled:border-none disabled:text-slate-400 text-slate-700 rounded-xl text-[11px] font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer shadow-sm"
+              >
+                {isZipping ? (
+                  <>
+                    <Loader2 className="w-3 h-3 animate-spin text-slate-400 flex-shrink-0" />
+                    <span className="truncate">Zipping...</span>
+                  </>
+                ) : (
+                  <>
+                    <FolderArchive className="w-3 h-3 text-brand-600 flex-shrink-0" />
+                    <span className="truncate">Download ZIP</span>
+                  </>
+                )}
+              </button>
+            </div>
 
             {/* CLEAR LIST */}
             <button
               onClick={handleClearList}
               disabled={files.length === 0 || isConvertingAll}
-              className="w-full py-2 px-4 bg-transparent hover:bg-rose-50 text-slate-500 hover:text-rose-600 rounded-xl text-xs font-medium flex items-center justify-center gap-2 transition-all cursor-pointer"
+              className="w-full py-1.5 px-3 bg-transparent hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-xl text-[11px] font-medium flex items-center justify-center gap-1.5 transition-all cursor-pointer"
             >
-              <Trash2 className="w-3.5 h-3.5" />
+              <Trash2 className="w-3.5 h-3.5 flex-shrink-0" />
               <span>Clear Queue List</span>
             </button>
           </div>
@@ -584,7 +744,7 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
                 </p>
                 <ul className="list-disc pl-4 space-y-1 mt-0.5 font-normal text-rose-700">
                   {!(typeof window !== 'undefined' && 'electronAPI' in window) && (
-                    <li className="text-indigo-950 font-semibold bg-indigo-50/70 p-1.5 rounded-lg border border-indigo-100 my-1">
+                    <li className="text-brand-950 font-semibold bg-brand-50/70 p-1.5 rounded-lg border border-brand-100 my-1">
                       🚀 <strong>Use the Electron Desktop App</strong>: Pack and launch your local build (`npm run electron:start` or `npm run package`) which activates <strong>GPU-accelerated, native zero-memory-limit converters</strong> (including macOS `sips` integration) to bypass browser bounds completely!
                     </li>
                   )}
@@ -600,13 +760,13 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
             {files.map((fileItem) => (
               <div 
                 key={fileItem.id} 
-                className="bg-slate-50/50 border border-slate-200 rounded-xl p-3 flex items-center gap-3 relative group hover:border-indigo-400 hover:bg-white transition-all overflow-hidden shadow-sm"
+                className="bg-slate-50/50 border border-slate-200 rounded-xl p-3 flex items-center gap-3 relative group hover:border-brand-400 hover:bg-white transition-all overflow-hidden shadow-sm"
               >
                 {/* Visual Image Preview Panel */}
                 <div 
                   onClick={() => fileItem.status === 'done' && downloadSingle(fileItem)}
                   className={`w-14 h-14 rounded-lg bg-slate-100 overflow-hidden flex items-center justify-center relative flex-shrink-0 cursor-pointer ${
-                    fileItem.status === 'done' ? 'ring-2 ring-indigo-500/10 border border-indigo-200' : 'border border-slate-200'
+                    fileItem.status === 'done' ? 'ring-2 ring-brand-500/10 border border-brand-200' : 'border border-slate-200'
                   }`}
                 >
                   {fileItem.status === 'done' && fileItem.convertedUrl ? (
@@ -617,7 +777,7 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
                       referrerPolicy="no-referrer"
                     />
                   ) : fileItem.status === 'converting' ? (
-                    <Loader2 className="w-5 h-5 text-indigo-600 animate-spin" />
+                    <Loader2 className="w-5 h-5 text-brand-600 animate-spin" />
                   ) : (
                     <ImageIcon className="w-6 h-6 text-slate-350" />
                   )}
@@ -640,7 +800,7 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
                       </span>
                     )}
                     {fileItem.status === 'converting' && (
-                      <span className="text-[10px] font-mono font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">
+                      <span className="text-[10px] font-mono font-bold text-brand-700 bg-brand-50 px-1.5 py-0.5 rounded border border-brand-100">
                         Converting
                       </span>
                     )}
@@ -674,7 +834,7 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
                   {fileItem.status === 'done' && (
                     <button
                       onClick={() => downloadSingle(fileItem)}
-                      className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 rounded-md transition-all cursor-pointer"
+                      className="p-1 text-slate-400 hover:text-brand-600 hover:bg-slate-100 rounded-md transition-all cursor-pointer"
                       title="Download JPG"
                     >
                       <Download className="w-3.5 h-3.5" />
@@ -689,7 +849,7 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
         <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400 shadow-sm">
           <FolderArchive className="w-12 h-12 text-slate-300 mx-auto mb-3" />
           <p className="text-slate-700 font-bold">Your transcoding queue is empty</p>
-          <p className="text-slate-400 text-xs mt-1">Upload HEIC files/folders above to transcode them into highly polished JPEGs instantly</p>
+          <p className="text-slate-400 text-xs mt-1">Upload HEIC or standard images/folders above to transcode them into highly polished JPEGs instantly</p>
         </div>
       )}
     </div>

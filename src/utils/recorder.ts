@@ -30,6 +30,8 @@ interface RecordOptions {
   width: number;
   height: number;
   onProgress: (current: number, total: number) => void;
+  bitrate?: number;
+  format?: 'mp4' | 'webm';
 }
 
 /**
@@ -42,6 +44,8 @@ export function compileVideo({
   width,
   height,
   onProgress,
+  bitrate,
+  format,
 }: RecordOptions): Promise<Blob> {
   return new Promise((resolve, reject) => {
     if (frames.length === 0) {
@@ -49,7 +53,39 @@ export function compileVideo({
       return;
     }
 
-    const mimeType = getSupportedMimeType();
+    let mimeType = getSupportedMimeType();
+    if (format === 'mp4') {
+      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+      if (isSafari && typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('video/mp4')) {
+        mimeType = 'video/mp4';
+      } else {
+        // Fallback to highly-reliable WebM on Chrome/Electron/Firefox (which avoids the 0kb empty blob bug)
+        const webmTypes = [
+          'video/webm;codecs=vp9,opus',
+          'video/webm;codecs=vp8,opus',
+          'video/webm',
+        ];
+        for (const t of webmTypes) {
+          if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(t)) {
+            mimeType = t;
+            break;
+          }
+        }
+      }
+    } else if (format === 'webm') {
+      const webmTypes = [
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm',
+      ];
+      for (const t of webmTypes) {
+        if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(t)) {
+          mimeType = t;
+          break;
+        }
+      }
+    }
+
     if (!mimeType) {
       reject(new Error('MediaRecorder is not fully supported in this browser. Please try Chrome, Firefox or Safari.'));
       return;
@@ -73,7 +109,7 @@ export function compileVideo({
     // Create MediaRecorder with high quality video bitrate
     const mediaRecorder = new MediaRecorder(stream, {
       mimeType,
-      videoBitsPerSecond: 8000000, // 8 Mbps for high fidelity
+      videoBitsPerSecond: bitrate || 45000000, // custom bitrate, default 45 Mbps
     });
 
     mediaRecorder.ondataavailable = (event) => {
@@ -83,7 +119,10 @@ export function compileVideo({
     };
 
     mediaRecorder.onstop = () => {
-      const videoBlob = new Blob(recordedChunks, { type: mimeType });
+      // If user selected mp4 format, we wrap the blob with video/mp4 MIME type
+      // so downstream download elements and players recognize it seamlessly.
+      const finalMime = format === 'mp4' ? 'video/mp4' : mimeType;
+      const videoBlob = new Blob(recordedChunks, { type: finalMime });
       resolve(videoBlob);
     };
 
@@ -95,7 +134,6 @@ export function compileVideo({
     const drawFrame = (frame: TimelineFrame): Promise<void> => {
       return new Promise((resolveFrame) => {
         const img = new Image();
-        img.src = frame.url;
         img.onload = () => {
           // Clear background (pitch black as standard video letterboxing)
           ctx.fillStyle = '#000000';
@@ -119,9 +157,9 @@ export function compileVideo({
           // Calculate fitted sizes (contain aspect ratios inside the output frame dimensions)
           // Adjust based on rotation (if portrait rotated, swap aspect check)
           const isRotated90or270 = frame.rotation === 90 || frame.rotation === 270;
-          const imgW = isRotated90or270 ? img.naturalHeight : img.naturalWidth;
-          const imgH = isRotated90or270 ? img.naturalWidth : img.naturalHeight;
-          const aspect = imgW / imgH;
+          const imgW = (isRotated90or270 ? img.naturalHeight : img.naturalWidth) || 1920;
+          const imgH = (isRotated90or270 ? img.naturalWidth : img.naturalHeight) || 1080;
+          const aspect = imgW / imgH || 16/9;
 
           let targetW = width;
           let targetH = height;
@@ -135,7 +173,7 @@ export function compileVideo({
           // Switch width/height measurements if we are drawing pre-rotated coordinates
           if (isRotated90or270) {
             // Since we canvas-translate to center and rotate, drawing sizes should match original image dimensions fitted
-            const factor = Math.min(width / imgH, height / imgW);
+            const factor = Math.min(width / imgH, height / imgW) || 1;
             ctx.drawImage(img, -img.naturalWidth * factor / 2, -img.naturalHeight * factor / 2, img.naturalWidth * factor, img.naturalHeight * factor);
           } else {
             ctx.drawImage(img, -targetW / 2, -targetH / 2, targetW, targetH);
@@ -153,36 +191,43 @@ export function compileVideo({
           ctx.fillText(`Error loading frame: ${frame.name}`, 40, height / 2);
           resolveFrame();
         };
+        img.src = frame.url;
       });
     };
 
-    // Start recording immediately
-    mediaRecorder.start();
+    // Pre-draw the first frame to initialize the canvas stream track with valid video dimensions and content
+    drawFrame(frames[0]).then(() => {
+      // Start recording with a timeslice of 100ms to guarantee data chunks are flushed periodically,
+      // avoiding silent buffer failures or empty blobs on canvas recording.
+      mediaRecorder.start(100);
 
-    // Loop through frames sequentially with fine-grained timers
-    let currentFrameIndex = 0;
-    const intervalMs = 1000 / fps;
+      // Loop through frames sequentially with fine-grained timers
+      let currentFrameIndex = 0;
+      const intervalMs = 1000 / fps;
 
-    async function processTimeline() {
-      if (currentFrameIndex >= frames.length) {
-        // Yield time for mediarecorder to finish processing tail canvas frames
-        setTimeout(() => {
-          mediaRecorder.stop();
-        }, 500);
-        return;
+      async function processTimeline() {
+        if (currentFrameIndex >= frames.length) {
+          // Yield time for mediarecorder to finish processing tail canvas frames
+          setTimeout(() => {
+            mediaRecorder.stop();
+          }, 500);
+          return;
+        }
+
+        const frame = frames[currentFrameIndex];
+        onProgress(currentFrameIndex + 1, frames.length);
+        
+        await drawFrame(frame);
+
+        currentFrameIndex++;
+        // Sleep to allow encoder to capture at the correct frame pacing
+        setTimeout(processTimeline, intervalMs);
       }
 
-      const frame = frames[currentFrameIndex];
-      onProgress(currentFrameIndex + 1, frames.length);
-      
-      await drawFrame(frame);
-
-      currentFrameIndex++;
-      // Sleep to allow encoder to capture at the correct frame pacing
-      setTimeout(processTimeline, intervalMs);
-    }
-
-    // Unleash processing
-    processTimeline();
+      // Start processing the timeline frames
+      processTimeline();
+    }).catch((err) => {
+      reject(err);
+    });
   });
 }

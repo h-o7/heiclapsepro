@@ -19,7 +19,9 @@ import {
   VolumeX,
   Gauge,
   Expand,
-  Clock
+  Clock,
+  SlidersHorizontal,
+  AlertCircle
 } from 'lucide-react';
 import { TimelineFrame } from '../types';
 import { compileVideo, getSupportedMimeType } from '../utils/recorder';
@@ -29,13 +31,20 @@ interface PlayerPreviewProps {
   frames: TimelineFrame[];
   currentIndex: number;
   setCurrentIndex: React.Dispatch<React.SetStateAction<number>>;
+  children?: React.ReactNode;
 }
 
-export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }: PlayerPreviewProps) {
+export default function PlayerPreview({ frames, currentIndex, setCurrentIndex, children }: PlayerPreviewProps) {
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [fps, setFps] = useState<number>(10);
   const [loop, setLoop] = useState<boolean>(true);
-  const [aspectRatioSetting, setAspectRatioSetting] = useState<'source' | '16-9' | '4-3' | '1-1'>('16-9');
+  
+  const [resolutionPreset, setResolutionPreset] = useState<'4k' | '1080p' | '720p' | 'square' | 'source'>('source');
+  const [exportFormat, setExportFormat] = useState<'mp4' | 'webm' | 'zip'>('mp4');
+  const [encodingQuality, setEncodingQuality] = useState<'standard' | 'high' | 'pristine'>('high');
+
+  const [speedFactor, setSpeedFactor] = useState<number>(1);
+  const [aspectRatio, setAspectRatio] = useState<'match' | '16-9' | '4-3' | '1-1' | '9-16'>('match');
   
   // Video compile states
   const [isCompiling, setIsCompiling] = useState<boolean>(false);
@@ -45,6 +54,7 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }:
 
   // Frames ZIP state
   const [isZipping, setIsZipping] = useState<boolean>(false);
+  const [timelineError, setTimelineError] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const playerContainerRef = useRef<HTMLDivElement>(null);
@@ -53,7 +63,7 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }:
   useEffect(() => {
     if (!isPlaying || frames.length === 0) return;
 
-    const intervalMs = 1000 / fps;
+    const intervalMs = 1000 / (fps * speedFactor);
     const timer = setInterval(() => {
       setCurrentIndex((prev) => {
         if (prev >= frames.length - 1) {
@@ -69,7 +79,7 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }:
     }, intervalMs);
 
     return () => clearInterval(timer);
-  }, [isPlaying, fps, loop, frames.length, setCurrentIndex]);
+  }, [isPlaying, fps, speedFactor, loop, frames.length, setCurrentIndex]);
 
   // Redraw canvas whenever frame changes, index changes, or aspect changes
   useEffect(() => {
@@ -85,8 +95,11 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }:
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       
       ctx.fillStyle = '#64748b';
-      ctx.font = '14px Inter, sans-serif';
+      // Dynamically scale font size so it's readable at higher canvas resolutions
+      const fontSize = Math.max(18, Math.min(Math.round(canvas.width * 0.032), Math.round(canvas.height * 0.048)));
+      ctx.font = `500 ${fontSize}px Inter, sans-serif`;
       ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
       ctx.fillText('Timeline empty. Upload or transcode HEIC photos to preview.', canvas.width / 2, canvas.height / 2);
       return;
     }
@@ -95,7 +108,6 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }:
     if (!currentFrame) return;
 
     const img = new Image();
-    img.src = currentFrame.url;
     img.onload = () => {
       const width = canvas.width;
       const height = canvas.height;
@@ -121,9 +133,9 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }:
 
       // Fit details
       const isRotated90or270 = currentFrame.rotation === 90 || currentFrame.rotation === 270;
-      const originalW = isRotated90or270 ? img.naturalHeight : img.naturalWidth;
-      const originalH = isRotated90or270 ? img.naturalWidth : img.naturalHeight;
-      const frameAspect = originalW / originalH;
+      const originalW = (isRotated90or270 ? img.naturalHeight : img.naturalWidth) || 1920;
+      const originalH = (isRotated90or270 ? img.naturalWidth : img.naturalHeight) || 1080;
+      const frameAspect = originalW / originalH || 16/9;
 
       let drawW = width;
       let drawH = height;
@@ -135,7 +147,7 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }:
       }
 
       if (isRotated90or270) {
-        const factor = Math.min(width / originalH, height / originalW);
+        const factor = Math.min(width / originalH, height / originalW) || 1;
         ctx.drawImage(img, -img.naturalWidth * factor / 2, -img.naturalHeight * factor / 2, img.naturalWidth * factor, img.naturalHeight * factor);
       } else {
         ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
@@ -143,34 +155,99 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }:
 
       ctx.restore();
     };
-  }, [frames, currentIndex, aspectRatioSetting]);
+    img.onerror = () => {
+      const width = canvas.width;
+      const height = canvas.height;
+      ctx.fillStyle = '#1e1e2e';
+      ctx.fillRect(0, 0, width, height);
+      ctx.fillStyle = '#f38ba8';
+      ctx.font = '16px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`Error rendering frame: ${currentFrame.name}`, width / 2, height / 2);
+    };
+    img.src = currentFrame.url;
+  }, [frames, currentIndex, resolutionPreset, aspectRatio]);
 
   // Calculate resolution outputs
   const getCanvasDimensions = (): { width: number; height: number } => {
-    if (frames.length > 0 && aspectRatioSetting === 'source') {
-      const first = frames[0];
-      // Bound it so it's not overly large for rendering canvas
-      const maxDim = 1920;
-      if (first.width > maxDim || first.height > maxDim) {
-        const ratio = first.width / first.height;
-        if (first.width > first.height) {
-          return { width: maxDim, height: Math.round(maxDim / ratio) };
+    // 1. Determine baseline height or bounding dimension based on preset
+    let baseHeight = 1080;
+    let baseWidth = 1920;
+    
+    switch (resolutionPreset) {
+      case '4k':
+        baseHeight = 2160;
+        baseWidth = 3840;
+        break;
+      case '1080p':
+        baseHeight = 1080;
+        baseWidth = 1920;
+        break;
+      case '720p':
+        baseHeight = 720;
+        baseWidth = 1280;
+        break;
+      case 'square':
+        baseHeight = 1080;
+        baseWidth = 1080;
+        break;
+      case 'source':
+      default:
+        if (frames.length > 0) {
+          const first = frames[0];
+          baseWidth = first.width;
+          baseHeight = first.height;
         } else {
-          return { width: Math.round(maxDim * ratio), height: maxDim };
+          baseWidth = 1920;
+          baseHeight = 1080;
         }
-      }
-      return { width: first.width, height: first.height };
+        break;
     }
 
-    switch (aspectRatioSetting) {
+    // 2. Adjust based on Output Aspect Ratio
+    if (aspectRatio === 'match') {
+      if (resolutionPreset === 'square') {
+        return { width: 1080, height: 1080 };
+      }
+      if (resolutionPreset === 'source') {
+        if (frames.length > 0) {
+          const first = frames[0];
+          const maxDim = 1920;
+          if (first.width > maxDim || first.height > maxDim) {
+            const ratio = first.width / first.height;
+            if (first.width > first.height) {
+              return { width: maxDim, height: Math.round(maxDim / ratio) };
+            } else {
+              return { width: Math.round(maxDim * ratio), height: maxDim };
+            }
+          }
+          return { width: first.width, height: first.height };
+        }
+        return { width: 1920, height: 1080 };
+      }
+      if (frames.length > 0) {
+        const nativeAspect = frames[0].width / frames[0].height;
+        if (nativeAspect > 1) {
+          return { width: Math.round(baseHeight * nativeAspect), height: baseHeight };
+        } else {
+          return { width: baseHeight, height: Math.round(baseHeight / nativeAspect) };
+        }
+      }
+      return { width: baseWidth, height: baseHeight };
+    }
+
+    // Explicit aspects
+    switch (aspectRatio) {
       case '16-9':
-        return { width: 1280, height: 720 };
+        return { width: baseHeight ? Math.round(baseHeight * (16 / 9)) : 1920, height: baseHeight };
       case '4-3':
-        return { width: 960, height: 720 };
+        return { width: baseHeight ? Math.round(baseHeight * (4 / 3)) : 1440, height: baseHeight };
       case '1-1':
-        return { width: 800, height: 800 };
+        return { width: baseHeight, height: baseHeight };
+      case '9-16':
+        return { width: baseHeight ? Math.round(baseHeight * (9 / 16)) : 607, height: baseHeight };
       default:
-        return { width: 1280, height: 720 };
+        return { width: baseWidth, height: baseHeight };
     }
   };
 
@@ -211,12 +288,21 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }:
     const targetWidth = renderWidth;
     const targetHeight = renderHeight;
 
+    let targetBitrate = 45000000;
+    if (encodingQuality === 'standard') {
+      targetBitrate = 5000000;
+    } else if (encodingQuality === 'pristine') {
+      targetBitrate = 95000000;
+    }
+
     try {
       const blob = await compileVideo({
         frames,
-        fps,
+        fps: fps * speedFactor,
         width: targetWidth,
         height: targetHeight,
+        bitrate: targetBitrate,
+        format: exportFormat === 'zip' ? 'mp4' : exportFormat,
         onProgress: (curr, tot) => {
           setCompileProgress(curr);
           setCompileTotal(tot);
@@ -235,7 +321,8 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }:
   // Download finished mp4/webm file
   const downloadVideo = () => {
     if (!finishedVideoBlob) return;
-    const extension = getSupportedMimeType().includes('mp4') ? 'mp4' : 'webm';
+    const isMp4 = finishedVideoBlob.type.includes('mp4') || exportFormat === 'mp4';
+    const extension = isMp4 ? 'mp4' : 'webm';
     const rawURL = URL.createObjectURL(finishedVideoBlob);
     
     const clicker = document.createElement('a');
@@ -244,6 +331,19 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }:
     clicker.click();
 
     setTimeout(() => URL.revokeObjectURL(rawURL), 1000);
+  };
+
+  // Delegate master export trigger based on selected exportFormat
+  const handleGenerateAndSave = () => {
+    if (frames.length === 0) {
+      setTimelineError("There is no data in your timeline! Please import some converted JPG photos or drag and drop images onto the timeline area first before generating a timelapse.");
+      return;
+    }
+    if (exportFormat === 'zip') {
+      handleDownloadFramesZip();
+    } else {
+      handleCompileVideo();
+    }
   };
 
   // Compile frames zip (renamed in sequential orders like frame_0001.jpg)
@@ -308,6 +408,8 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }:
 
   return (
     <div className="space-y-6">
+      {children}
+
       {/* Dynamic Player Sandbox with standard premium borders and controls */}
       <div 
         ref={playerContainerRef}
@@ -326,7 +428,7 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }:
             {/* Master loading compiled screen */}
             {isCompiling && (
               <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-sm z-35 flex flex-col items-center justify-center p-6 text-center">
-                <Loader2 className="w-12 h-12 text-indigo-500 animate-spin mb-4" />
+                <Loader2 className="w-12 h-12 text-brand-500 animate-spin mb-4" />
                 <h3 className="text-lg font-bold text-slate-100">Compiling Timelapse Video</h3>
                 <p className="text-slate-400 text-xs mt-2 font-mono">
                   Drawing, rotating, and encoding frame {compileProgress} of {compileTotal}
@@ -334,7 +436,7 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }:
                 
                 <div className="w-full max-w-xs bg-slate-900 border border-slate-800 rounded-full h-2 mt-4 overflow-hidden">
                   <div 
-                    className="bg-indigo-600 h-full transition-all duration-200"
+                    className="bg-brand-600 h-full transition-all duration-200"
                     style={{ width: `${(compileProgress / compileTotal) * 100}%` }}
                   />
                 </div>
@@ -347,7 +449,7 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }:
         </div>
 
         {/* Timeline Scrubber Bar */}
-        <div className="px-6 py-3 border-t border-slate-150 bg-slate-50/80 flex items-center gap-4">
+        <div className="px-6 py-3 bg-slate-50/80 flex items-center gap-4">
           <span className="text-slate-400 font-mono text-[10px] font-bold select-none">
             FRAME: {frames.length > 0 ? currentIndex + 1 : 0}/{frames.length}
           </span>
@@ -362,7 +464,7 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }:
               setCurrentIndex(parseInt(e.target.value));
             }}
             disabled={frames.length <= 1}
-            className="flex-grow h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-650 disabled:opacity-30"
+            className="flex-grow h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-brand-650 disabled:opacity-30"
           />
 
           <span className="text-slate-650 font-mono text-xs flex items-center gap-1.5 font-bold select-none">
@@ -372,52 +474,52 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }:
         </div>
 
         {/* Physical Timeline Controls Panel */}
-        <div className="p-6 bg-white border-t border-slate-150 flex flex-col md:flex-row gap-6 md:items-center justify-between">
+        <div className="py-2 px-4 bg-white flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
           
           {/* Main timeline deck buttons */}
-          <div className="flex items-center gap-1.5 w-full md:w-auto md:justify-start justify-center">
+          <div className="flex items-center gap-1 w-full sm:w-auto sm:justify-start justify-center">
             <button
               onClick={handleStop}
               disabled={frames.length === 0}
-              className="p-3 text-slate-400 hover:text-slate-700 disabled:opacity-35 disabled:hover:text-slate-400 transition-all cursor-pointer rounded-xl hover:bg-slate-50"
+              className="p-1.5 text-slate-400 hover:text-slate-700 disabled:opacity-35 disabled:hover:text-slate-400 transition-all cursor-pointer rounded-lg hover:bg-slate-50"
               title="Stop & Reset"
             >
-              <Square className="w-4 h-4 fill-current text-slate-400" />
+              <Square className="w-3.5 h-3.5 fill-current text-slate-400" />
             </button>
 
             <button
               onClick={handleStepBack}
               disabled={frames.length === 0}
-              className="p-3 text-slate-400 hover:text-slate-700 disabled:opacity-35 disabled:hover:text-slate-400 transition-all cursor-pointer rounded-xl hover:bg-slate-50"
+              className="p-1.5 text-slate-400 hover:text-slate-700 disabled:opacity-35 disabled:hover:text-slate-400 transition-all cursor-pointer rounded-lg hover:bg-slate-50"
               title="Previous Frame"
             >
-              <ChevronLeft className="w-5 h-5" />
+              <ChevronLeft className="w-4 h-4" />
             </button>
 
             <button
               onClick={handleTogglePlay}
               disabled={frames.length === 0}
-              className={`p-4 rounded-full border shadow-md flex items-center justify-center transition-all cursor-pointer ${
+              className={`p-2 rounded-full border shadow-sm flex items-center justify-center transition-all cursor-pointer ${
                 isPlaying 
-                  ? 'bg-indigo-600 border-indigo-500 text-white hover:bg-indigo-500 scale-[1.03] shadow-lg shadow-indigo-200'
-                  : 'bg-slate-100 border-slate-200 text-slate-800 hover:bg-slate-200 scale-100 shadow-sm'
+                  ? 'bg-brand-600 border-brand-500 text-white hover:bg-brand-500 scale-[1.03] shadow-md shadow-brand-100'
+                  : 'bg-slate-100 border-slate-200 text-slate-800 hover:bg-slate-200 scale-100'
               } disabled:opacity-35`}
               title={isPlaying ? 'Pause' : 'Play Timeline'}
             >
               {isPlaying ? (
-                <Pause className="w-5 h-5 fill-current text-white" />
+                <Pause className="w-3.5 h-3.5 fill-current text-white" />
               ) : (
-                <Play className="w-5 h-5 fill-current ml-0.5 text-slate-800" />
+                <Play className="w-3.5 h-3.5 fill-current ml-0.5 text-slate-800" />
               )}
             </button>
 
             <button
               onClick={handleStepForward}
               disabled={frames.length === 0}
-              className="p-3 text-slate-400 hover:text-slate-700 disabled:opacity-35 disabled:hover:text-slate-400 transition-all cursor-pointer rounded-xl hover:bg-slate-50"
+              className="p-1.5 text-slate-400 hover:text-slate-700 disabled:opacity-35 disabled:hover:text-slate-400 transition-all cursor-pointer rounded-lg hover:bg-slate-50"
               title="Next Frame"
             >
-              <ChevronRight className="w-5 h-5" />
+              <ChevronRight className="w-4 h-4" />
             </button>
 
             <button
@@ -426,31 +528,33 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }:
                 setCurrentIndex(0);
               }}
               disabled={frames.length === 0}
-              className="p-3 text-slate-400 hover:text-slate-700 disabled:opacity-35 disabled:hover:text-slate-400 transition-all cursor-pointer rounded-xl hover:bg-slate-50"
+              className="p-1.5 text-slate-400 hover:text-slate-700 disabled:opacity-35 disabled:hover:text-slate-400 transition-all cursor-pointer rounded-lg hover:bg-slate-50"
               title="Rewind to Start"
             >
-              <RotateCcw className="w-4 h-4" />
+              <RotateCcw className="w-3.5 h-3.5" />
             </button>
           </div>
 
           {/* Framerate Slider and configuration tags */}
-          <div className="flex flex-col sm:flex-row gap-6 md:items-center">
+          <div className="flex items-center justify-between sm:justify-end gap-4 w-full sm:w-auto">
             
             {/* FPS Selector */}
-            <div className="flex items-center gap-3">
-              <span className="flex-shrink-0 text-slate-500 font-bold text-xs flex items-center gap-1 font-mono">
-                <Gauge className="w-3.5 h-3.5 text-indigo-600" /> PLAY FPS:
+            <div className="flex items-center gap-2">
+              <span className="text-slate-500 font-bold text-[10px] flex items-center gap-1 font-mono">
+                <Gauge className="w-3 h-3 text-brand-600" /> PLAY FPS:
               </span>
-              <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 py-1.5 px-3 rounded-xl shadow-inner">
+              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 py-1 px-2 rounded-lg shadow-inner">
                 <input
                   type="range"
                   min="1"
-                  max="40"
+                  max="60"
                   value={fps}
                   onChange={(e) => setFps(parseInt(e.target.value))}
-                  className="w-24 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                  className="w-20 sm:w-24 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-brand-600"
                 />
-                <span className="text-xs font-mono font-bold text-indigo-600 min-w-[44px] text-right">{fps} FPS</span>
+                <span className="text-[10px] font-mono font-bold text-brand-600 min-w-[48px] text-right">
+                  {fps * speedFactor} FPS
+                </span>
               </div>
             </div>
 
@@ -458,13 +562,13 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }:
             <button
               onClick={() => setLoop(!loop)}
               disabled={frames.length === 0}
-              className={`text-xs font-bold px-4 py-2 rounded-xl border transition-all cursor-pointer ${
+              className={`text-[10px] font-bold px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer ${
                 loop
-                  ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
+                  ? 'bg-brand-50 border-brand-200 text-brand-700'
                   : 'bg-transparent border-slate-200 text-slate-400'
               }`}
             >
-              {loop ? 'Loop Play' : 'Once-Through'}
+              {loop ? 'Loop' : 'Once'}
             </button>
           </div>
 
@@ -472,112 +576,273 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }:
       </div>
 
       {/* Export Workspace & Settings Card */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 text-slate-800 space-y-6 shadow-lg">
         
-        {/* Setting 1: Playback aspect ratios */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-4 shadow-sm">
-          <span className="text-xs text-slate-450 font-mono tracking-wider uppercase flex items-center gap-1.5 font-bold">
-            <Expand className="w-3.5 h-3.5 text-indigo-600" />
-            Aspect Framing Plan
-          </span>
-          
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { label: 'Original Source', value: 'source' },
-              { label: 'Widescreen (16:9)', value: '16-9' },
-              { label: 'Standard (4:3)', value: '4-3' },
-              { label: 'Square (1:1)', value: '1-1' },
-            ].map((option) => (
-              <button
-                key={option.value}
-                onClick={() => setAspectRatioSetting(option.value as any)}
-                className={`py-3 px-3.5 text-xs text-center border font-semibold rounded-xl transition-all cursor-pointer ${
-                  aspectRatioSetting === option.value
-                    ? 'bg-indigo-50 border-indigo-350 text-indigo-750 shadow-sm'
-                    : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50 hover:text-slate-800'
-                }`}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-          <p className="text-[10px] text-slate-400 leading-relaxed font-mono">
-            {aspectRatioSetting === 'source' 
-              ? 'Calculated dynamically based on initial storyboard dimensions.'
-              : `Enforces standard target output container of ${renderWidth} × ${renderHeight} pixels.`}
-          </p>
+        {/* CARD HEADER */}
+        <div className="flex items-center gap-2">
+          <SlidersHorizontal className="w-4 h-4 text-brand-600" />
+          <h2 className="text-xs font-bold text-slate-500 uppercase tracking-widest font-mono">Export Settings</h2>
         </div>
 
-        {/* Setting 2: Sequence ZIP Downloader */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col justify-between space-y-4 shadow-sm">
-          <div className="space-y-2">
-            <span className="text-xs text-slate-450 font-mono tracking-wider uppercase flex items-center gap-1.5 font-bold">
-              <ImageDown className="w-3.5 h-3.5 text-indigo-600" />
-              ZIP Numbered Frames
-            </span>
-            <p className="text-slate-500 text-xs leading-relaxed">
-              Consolidates all current timeline photos in a single ZIP container, renamed sequentially (e.g. `frame_0001.jpg`, `frame_0002.jpg`), optimized for native integration with After Effects, Premiere, or DaVinci.
-            </p>
-          </div>
-
-          <button
-            onClick={handleDownloadFramesZip}
-            disabled={frames.length === 0 || isZipping}
-            className="w-full py-3 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 disabled:bg-slate-100 disabled:text-slate-400 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
-          >
-            {isZipping ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" />
-                <span>Renaming & packaging...</span>
-              </>
-            ) : (
-              <>
-                <Download className="w-3.5 h-3.5" />
-                <span>Download Sequence ZIP ({frames.length})</span>
-              </>
-            )}
-          </button>
-        </div>
-
-        {/* Setting 3: Render and Export MP4/WebM Video */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 flex flex-col justify-between space-y-4 shadow-sm">
-          <div className="space-y-2">
-            <span className="text-xs text-slate-450 font-mono tracking-wider uppercase flex items-center gap-1.5 font-bold">
-              <Film className="w-3.5 h-3.5 text-indigo-600" />
-              Compile Master Output
-            </span>
-            <p className="text-slate-500 text-xs leading-relaxed">
-              Sequentially renders frames matching speed plans into raw track buffers and exports a fully processed, standalone video compatible with all media devices.
-            </p>
-          </div>
-
-          {finishedVideoBlob ? (
-            <div className="grid grid-cols-2 gap-2">
+        {/* SECTION: Generate & Save Action block */}
+        <div className="space-y-3">
+          {finishedVideoBlob && exportFormat !== 'zip' ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
-                onClick={handleCompileVideo}
-                className="py-3 px-2 text-slate-600 hover:text-slate-800 border border-slate-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer bg-white"
+                onClick={handleGenerateAndSave}
+                disabled={isCompiling || isZipping}
+                className="py-3.5 px-4 bg-slate-50 border border-slate-200 text-slate-500 hover:bg-slate-100/50 hover:border-slate-300 hover:text-black rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm"
               >
-                Recompile
+                Recompile Timelapse
               </button>
               <button
                 onClick={downloadVideo}
-                className="py-3 px-2 bg-emerald-650 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all cursor-pointer shadow-md shadow-emerald-100"
+                className="py-3.5 px-4 bg-brand-600 border border-transparent hover:border-brand-200 hover:bg-brand-50 hover:text-black text-white rounded-xl text-xs font-semibold tracking-wide flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md shadow-brand-200 hover:shadow-lg hover:shadow-brand-200/80"
               >
-                <FileVideo className="w-3.5 h-3.5 text-white" />
-                Export Media
+                <FileVideo className="w-3.5 h-3.5" />
+                Export Media Output
               </button>
             </div>
           ) : (
             <button
-              onClick={handleCompileVideo}
-              disabled={frames.length === 0 || isCompiling}
-              className="w-full py-3 bg-indigo-650 hover:bg-indigo-600 text-white disabled:bg-slate-105 disabled:text-slate-400 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-indigo-150"
+              onClick={handleGenerateAndSave}
+              disabled={isCompiling || isZipping}
+              className="w-full py-4 bg-brand-600 border border-transparent hover:border-brand-200 hover:bg-brand-50 hover:text-black disabled:bg-slate-100 disabled:text-slate-400 text-white rounded-xl text-xs font-semibold tracking-wide flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md shadow-brand-200 hover:shadow-lg hover:shadow-brand-200/80 active:scale-[0.99] disabled:hover:bg-slate-100 disabled:hover:text-slate-400 disabled:hover:border-transparent"
             >
-              <FileVideo className="w-3.5 h-3.5" />
-              <span>Compile & Save Video Block</span>
+              {isCompiling || isZipping ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>PROCESSING SEQUENCE...</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4 stroke-[3]" />
+                  <span>GENERATE & SAVE</span>
+                </>
+              )}
             </button>
           )}
+
+          <div className="text-center">
+            <span className="text-[10px] text-slate-400 font-mono">
+              {exportFormat === 'zip' 
+                ? `Renames & packages ${frames.length} sequential JPG files inside a ZIP folder.`
+                : `Compiles ${frames.length} active frames at ${renderWidth} × ${renderHeight} px.`}
+            </span>
+          </div>
         </div>
+
+        {/* SECTION: Frame Rate */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">Frame Rate</span>
+            <span className="bg-brand-50 border border-brand-200 text-brand-700 text-xs font-bold px-2.5 py-1 rounded font-mono shadow-sm">
+              {fps} FPS
+            </span>
+          </div>
+          
+          <div className="space-y-2">
+            <input
+              type="range"
+              min="1"
+              max="60"
+              value={fps}
+              onChange={(e) => setFps(parseInt(e.target.value))}
+              className="w-full h-1.5 bg-slate-100 border border-slate-200 rounded-lg appearance-none cursor-pointer accent-brand-600 focus:outline-none"
+            />
+            <div className="flex justify-between text-[10px] font-mono font-medium text-slate-400 px-1 select-none">
+              <span>1 FPS</span>
+              <span>24 FPS (Cinema)</span>
+              <span>30 FPS (Standard)</span>
+              <span>60 FPS</span>
+            </div>
+          </div>
+        </div>
+
+        {/* SECTION: Timelapse Speed Factor */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">Timelapse Speed Factor</span>
+            <span className="bg-brand-50 border border-brand-200 text-brand-700 text-xs font-bold px-2.5 py-1 rounded font-mono shadow-sm">
+              {speedFactor}x {speedFactor === 1 ? '(Normal)' : speedFactor <= 3 ? '(Fast)' : '(Hyper)'}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-5 p-1 bg-slate-50 border border-slate-200 rounded-xl">
+            {[1, 2, 3, 4, 8].map((factor) => (
+              <button
+                key={factor}
+                type="button"
+                onClick={() => setSpeedFactor(factor)}
+                className={`py-2 text-xs font-bold rounded-lg transition-all text-center cursor-pointer ${
+                  speedFactor === factor
+                    ? 'bg-brand-600 text-white shadow-sm'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                {factor}x
+              </button>
+            ))}
+          </div>
+          <p className="text-[10px] text-slate-400 font-medium">
+            Smooth sequence: Processing every uploaded photo frame in correct order.
+          </p>
+        </div>
+
+        {/* SECTION: Output Aspect Ratio */}
+        <div className="space-y-3">
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">Output Aspect Ratio</span>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            {[
+              { id: 'match', name: 'Match', sub: 'Auto' },
+              { id: '16-9', name: 'Widescreen', sub: '16:9' },
+              { id: '4-3', name: 'Classic', sub: '4:3' },
+              { id: '1-1', name: 'Square', sub: '1:1' },
+              { id: '9-16', name: 'Vertical', sub: '9:16' },
+            ].map((aspect) => (
+              <button
+                key={aspect.id}
+                type="button"
+                onClick={() => setAspectRatio(aspect.id as any)}
+                className={`p-3 rounded-xl border text-center transition-all cursor-pointer flex flex-col justify-center items-center group ${
+                  aspectRatio === aspect.id
+                    ? 'bg-brand-600 border-brand-600 text-white shadow-sm'
+                    : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50 hover:border-slate-300 hover:text-black'
+                }`}
+              >
+                <div className="font-bold text-xs transition-colors">
+                  {aspect.name}
+                </div>
+                <div className={`text-[10px] font-mono mt-0.5 transition-colors ${aspectRatio === aspect.id ? 'text-brand-200' : 'text-slate-400 group-hover:text-slate-600'}`}>
+                  {aspect.sub}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+        
+        {/* SECTION 1: Resolution Presets */}
+        <div className="space-y-3">
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">Resolution Presets</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            {[
+              { id: 'source', name: 'Original Source', desc: frames.length > 0 ? `${frames[0].width} × ${frames[0].height} px (Native)` : 'Native Size' },
+              { id: '4k', name: '4K Ultra HD', desc: '3840 × 2160 px' },
+              { id: '1080p', name: '1080p Full HD', desc: '1920 × 1080 px' },
+              { id: '720p', name: '720p HD Ready', desc: '1280 × 720 px' },
+              { id: 'square', name: 'Square Canvas', desc: '1080 × 1080 px' },
+            ].map((preset) => (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => setResolutionPreset(preset.id as any)}
+                className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer group ${
+                  resolutionPreset === preset.id
+                    ? 'bg-brand-600 border-brand-600 text-white shadow-sm'
+                    : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50 hover:border-slate-300 hover:text-black'
+                }`}
+              >
+                <div className="font-bold text-xs transition-colors">
+                  {preset.name}
+                </div>
+                <div className={`text-[10px] font-mono mt-1 transition-colors ${resolutionPreset === preset.id ? 'text-brand-200' : 'text-slate-400 group-hover:text-slate-600'}`}>
+                  {preset.desc}
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* SECTION 2: Export Format */}
+        <div className="space-y-3">
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">Export Format</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {[
+              { id: 'mp4', name: 'MP4 Video', desc: 'Universal H.264', icon: FileVideo },
+              { id: 'webm', name: 'WebM Movie', desc: 'Fast HTML5 web', icon: Film },
+              { id: 'zip', name: 'Sequenced ZIP', desc: 'For video editors', icon: ImageDown },
+            ].map((format) => {
+              const Icon = format.icon;
+              return (
+                <button
+                  key={format.id}
+                  type="button"
+                  onClick={() => setExportFormat(format.id as any)}
+                  className={`p-4 rounded-xl border text-left transition-all cursor-pointer flex items-start gap-3 group ${
+                    exportFormat === format.id
+                      ? 'bg-brand-600 border-brand-600 text-white shadow-sm'
+                      : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50 hover:border-slate-300 hover:text-black'
+                  }`}
+                >
+                  <div className={`p-2 rounded-lg transition-colors ${
+                    exportFormat === format.id 
+                      ? 'bg-brand-700 text-white' 
+                      : 'bg-white text-slate-400 border border-slate-150 group-hover:border-slate-300'
+                  }`}>
+                    <Icon className="w-4 h-4" />
+                  </div>
+                  <div className="space-y-0.5">
+                    <div className="font-bold text-xs transition-colors">
+                      {format.name}
+                    </div>
+                    <div className={`text-[10px] font-sans transition-colors ${
+                      exportFormat === format.id ? 'text-brand-200' : 'text-slate-400 group-hover:text-slate-600'
+                    }`}>
+                      {format.desc}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* SECTION 3: Video Encoding Quality */}
+        {exportFormat !== 'zip' && (
+          <>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">Video Encoding Quality</h3>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-brand-50 border border-brand-150 text-brand-600 font-mono">
+                  {encodingQuality === 'standard' ? '5 Mbps Standard' : encodingQuality === 'high' ? '45 Mbps Studio' : '95 Mbps Pristine'}
+                </span>
+              </div>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {[
+                  { id: 'standard', name: 'Standard', desc: '5 Mbps' },
+                  { id: 'high', name: 'High', value: '45 Mbps', desc: '45 Mbps' },
+                  { id: 'pristine', name: 'Pristine', desc: '95 Mbps' },
+                ].map((quality) => (
+                  <button
+                    key={quality.id}
+                    type="button"
+                    onClick={() => setEncodingQuality(quality.id as any)}
+                    className={`p-3.5 rounded-xl border text-center transition-all cursor-pointer group ${
+                      encodingQuality === quality.id
+                        ? 'bg-brand-600 border-brand-600 text-white shadow-sm'
+                        : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100/50 hover:border-slate-300 hover:text-black'
+                    }`}
+                  >
+                    <div className="font-bold text-xs transition-colors">
+                      {quality.name}
+                    </div>
+                    <div className={`text-[10px] font-mono mt-1 transition-colors ${
+                      encodingQuality === quality.id ? 'text-brand-200' : 'text-slate-400 group-hover:text-slate-600'
+                    }`}>
+                      {quality.desc}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-slate-500 leading-relaxed font-sans mt-2">
+                {encodingQuality === 'standard' && "Balanced bitrates. Optimized for faster web uploads and compact file sizes."}
+                {encodingQuality === 'high' && "Crisp studio grade. Ideal for 1080p/4K timelines with ultra-low compression artifacts."}
+                {encodingQuality === 'pristine' && "Lossless-grade maximum density. Best for archive master records and high-fidelity projections."}
+              </p>
+            </div>
+          </>
+        )}
 
       </div>
 
@@ -589,8 +854,31 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex }:
             Master Timelapse Compiled successfully!
           </span>
           <span className="font-mono bg-white px-2 py-0.5 rounded border border-emerald-150 text-emerald-700 font-semibold shadow-sm">
-            Size: {formatSize(finishedVideoBlob.size)} • {getSupportedMimeType().includes('mp4') ? 'MPEG-4 Container' : 'WebM Streams'}
+            Size: {formatSize(finishedVideoBlob.size)} • {(finishedVideoBlob.type.includes('mp4') || exportFormat === 'mp4') ? 'MPEG-4 Container (MP4)' : 'WebM Container (WEBM)'}
           </span>
+        </div>
+      )}
+
+      {/* Modern Pop Alert Modal for Empty Timeline */}
+      {timelineError && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 text-red-650 mb-3">
+              <div className="p-2 bg-red-50 rounded-full">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <h3 className="font-bold text-base text-slate-900">Empty Timeline</h3>
+            </div>
+            <p className="text-slate-600 text-xs leading-relaxed mb-6 font-medium">
+              {timelineError}
+            </p>
+            <button
+              onClick={() => setTimelineError(null)}
+              className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold tracking-wide transition-all cursor-pointer active:scale-95 text-center"
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
     </div>

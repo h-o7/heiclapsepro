@@ -18,6 +18,7 @@ import PlayerPreview from './components/PlayerPreview';
 import TimelineGrid from './components/TimelineGrid';
 import HEICConverter from './components/HEICConverter';
 import { TimelineFrame, ActiveTab } from './types';
+import packageJson from '../package.json';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('converter');
@@ -38,20 +39,20 @@ export default function App() {
   };
 
   return (
-    <div id="app-root" className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans selection:bg-indigo-500/20 selection:text-indigo-900">
+    <div id="app-root" className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans selection:bg-brand-500/20 selection:text-brand-900">
       
       {/* Top Professional Control Header */}
       <header className="border-b border-slate-200 bg-white sticky top-0 z-40 px-6 py-4 shadow-sm">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-150">
+            <div className="w-10 h-10 rounded-xl bg-brand-600 flex items-center justify-center shadow-lg shadow-brand-150">
               <Film className="w-5 h-5 text-white" />
             </div>
             <div>
               <h1 className="text-base font-bold tracking-tight text-slate-800 flex items-center gap-2">
                 Chronos Pro Studio
-                <span className="text-[10px] bg-indigo-50 text-indigo-600 font-mono font-bold px-2 py-0.5 rounded border border-indigo-100">
-                  v1.2
+                <span className="text-[10px] bg-brand-50 text-brand-600 font-mono font-bold px-2 py-0.5 rounded border border-brand-100">
+                  v{packageJson.version}
                 </span>
               </h1>
               <p className="text-[11px] text-slate-400 font-medium">
@@ -66,7 +67,7 @@ export default function App() {
               onClick={() => setActiveTab('converter')}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all cursor-pointer ${
                 activeTab === 'converter'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200'
+                  ? 'bg-brand-600 text-white shadow-md shadow-brand-200'
                   : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
               }`}
             >
@@ -78,16 +79,16 @@ export default function App() {
               onClick={() => setActiveTab('timelapse')}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all cursor-pointer ${
                 activeTab === 'timelapse'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200'
+                  ? 'bg-brand-600 text-white shadow-md shadow-brand-200'
                   : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
               }`}
             >
               <Film className="w-3.5 h-3.5" />
-              <span>Timelapse Workspace</span>
+              <span>Timelapse Pro</span>
               {frames.length > 0 && (
                 <span className={`px-1.5 py-0.5 font-mono text-[9px] rounded font-bold ${
                   activeTab === 'timelapse' 
-                    ? 'bg-indigo-900/20 text-indigo-100' 
+                    ? 'bg-brand-900/20 text-brand-100' 
                     : 'bg-slate-200 text-slate-500'
                 }`}>
                   {frames.length}
@@ -109,15 +110,15 @@ export default function App() {
               frames={frames} 
               currentIndex={currentIndex} 
               setCurrentIndex={setCurrentIndex} 
-            />
-
-            {/* Sequence list storyboard container */}
-            <TimelineGrid 
-              frames={frames} 
-              setFrames={setFrames} 
-              currentIndex={currentIndex} 
-              setCurrentIndex={setCurrentIndex} 
-            />
+            >
+              {/* Sequence list storyboard container */}
+              <TimelineGrid 
+                frames={frames} 
+                setFrames={setFrames} 
+                currentIndex={currentIndex} 
+                setCurrentIndex={setCurrentIndex} 
+              />
+            </PlayerPreview>
 
           </div>
         ) : (
@@ -145,11 +146,11 @@ export default function App() {
               href="https://github.com/h-o7/heiclapsepro" 
               target="_blank" 
               rel="noopener noreferrer" 
-              className="text-indigo-600 hover:text-indigo-700 hover:underline flex items-center gap-1.5 font-bold transition-colors cursor-pointer"
+              className="text-brand-600 hover:text-brand-700 hover:underline flex items-center gap-1.5 font-bold transition-colors cursor-pointer"
               title="Need 10-bit HDR HEIC conversion? Get the Electron Desktop App from GitHub!"
             >
-              <Github className="w-3.5 h-3.5 text-indigo-500" />
-              <span>10-Bit Converter (Desktop App)</span>
+              <Github className="w-3.5 h-3.5 text-brand-500" />
+              <span>Chronos Pro Studio Github</span>
             </a>
             <span>•</span>
             <span>Google AI Studio Applet</span>

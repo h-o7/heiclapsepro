@@ -35,6 +35,7 @@ export default function TimelineGrid({ frames, setFrames, currentIndex, setCurre
   const [onTheFlyConverting, setOnTheFlyConverting] = useState<boolean>(false);
   const [onTheFlyCount, setOnTheFlyCount] = useState<number>(0);
   const [onTheFlyTotal, setOnTheFlyTotal] = useState<number>(0);
+  const [isConfirmingClear, setIsConfirmingClear] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Trigger file browse
@@ -206,11 +207,15 @@ export default function TimelineGrid({ frames, setFrames, currentIndex, setCurre
   };
 
   const handleClearAll = () => {
-    if (window.confirm('Are you sure you want to clear your entire timelapse timeline?')) {
-      frames.forEach((f) => URL.revokeObjectURL(f.url));
-      setFrames([]);
-      setCurrentIndex(0);
+    if (!isConfirmingClear) {
+      setIsConfirmingClear(true);
+      setTimeout(() => setIsConfirmingClear(false), 3000);
+      return;
     }
+    frames.forEach((f) => URL.revokeObjectURL(f.url));
+    setFrames([]);
+    setCurrentIndex(0);
+    setIsConfirmingClear(false);
   };
 
   const formatSize = (bytes: number) => {
@@ -243,7 +248,7 @@ export default function TimelineGrid({ frames, setFrames, currentIndex, setCurre
             className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 disabled:bg-slate-100 disabled:text-slate-400 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
             title="Sort frames matching numeric alphabetical order inside names"
           >
-            <ArrowUpDown className="w-3.5 h-3.5 text-indigo-600" />
+            <ArrowUpDown className="w-3.5 h-3.5 text-brand-600" />
             <span>Sort Name (A-Z)</span>
           </button>
 
@@ -262,7 +267,7 @@ export default function TimelineGrid({ frames, setFrames, currentIndex, setCurre
             disabled={frames.length <= 1}
             className="px-3.5 py-2 bg-white border border-slate-300 hover:bg-slate-50 disabled:bg-slate-100 disabled:text-slate-400 text-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
           >
-            <ListRestart className="w-3.5 h-3.5 text-indigo-600" />
+            <ListRestart className="w-3.5 h-3.5 text-brand-600" />
             <span>Reverse Order</span>
           </button>
 
@@ -280,10 +285,14 @@ export default function TimelineGrid({ frames, setFrames, currentIndex, setCurre
           <button
             onClick={handleClearAll}
             disabled={frames.length === 0}
-            className="px-3.5 py-2 bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100/50 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-none rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+            className={`px-3.5 py-2 border rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+              isConfirmingClear
+                ? 'bg-rose-600 text-white border-rose-600 hover:bg-rose-700 animate-pulse'
+                : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100/50 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-none'
+            }`}
           >
-            <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-            <span>Clear Timeline</span>
+            <Trash2 className={`w-3.5 h-3.5 ${isConfirmingClear ? 'text-white' : 'text-rose-600'}`} />
+            <span>{isConfirmingClear ? 'Click Again to Clear!' : 'Clear Timeline'}</span>
           </button>
         </div>
       </div>
@@ -303,7 +312,7 @@ export default function TimelineGrid({ frames, setFrames, currentIndex, setCurre
         <button
           onClick={triggerFileInput}
           disabled={onTheFlyConverting}
-          className="px-5 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-100 disabled:text-slate-400 text-white rounded-xl text-xs font-bold flex items-center gap-2.5 transition-all cursor-pointer shadow-md shadow-indigo-150"
+          className="px-5 py-3 bg-brand-600 hover:bg-brand-500 disabled:bg-slate-100 disabled:text-slate-400 text-white rounded-xl text-xs font-bold flex items-center gap-2.5 transition-all cursor-pointer shadow-md shadow-brand-150"
         >
           {onTheFlyConverting ? (
             <>
@@ -335,8 +344,8 @@ export default function TimelineGrid({ frames, setFrames, currentIndex, setCurre
                 onClick={() => setCurrentIndex(index)}
                 className={`relative bg-slate-50 border rounded-2xl overflow-hidden group transition-all duration-200 flex flex-col justify-between cursor-pointer shadow-sm ${
                   isSelected 
-                    ? 'border-indigo-505 bg-white shadow-md shadow-indigo-100 ring-2 ring-indigo-500/20 z-10' 
-                    : 'border-slate-200 hover:border-indigo-300 hover:bg-white'
+                    ? 'border-brand-500 bg-white shadow-md shadow-brand-100 ring-2 ring-brand-500/20 z-10' 
+                    : 'border-slate-200 hover:border-brand-300 hover:bg-white'
                 }`}
               >
                 {/* Image panel with layout metrics */}
@@ -382,10 +391,10 @@ export default function TimelineGrid({ frames, setFrames, currentIndex, setCurre
                           e.stopPropagation();
                           rotateFrame(index);
                         }}
-                        className="p-1 hover:text-indigo-650 hover:bg-slate-100 rounded transition-all"
+                        className="p-1 hover:text-brand-650 hover:bg-slate-100 rounded transition-all"
                         title="Rotate 90 degrees Clockwise"
                       >
-                        <RotateCw className="w-3 h-3 text-indigo-600" />
+                        <RotateCw className="w-3 h-3 text-brand-600" />
                       </button>
                       
                       <button
@@ -393,10 +402,10 @@ export default function TimelineGrid({ frames, setFrames, currentIndex, setCurre
                           e.stopPropagation();
                           flipFrame(index);
                         }}
-                        className="p-1 hover:text-indigo-650 hover:bg-slate-100 rounded transition-all"
+                        className="p-1 hover:text-brand-650 hover:bg-slate-100 rounded transition-all"
                         title="Flip Horizontally"
                       >
-                        <FlipHorizontal className="w-3 h-3 text-indigo-600" />
+                        <FlipHorizontal className="w-3 h-3 text-brand-600" />
                       </button>
 
                       <button
@@ -404,10 +413,10 @@ export default function TimelineGrid({ frames, setFrames, currentIndex, setCurre
                           e.stopPropagation();
                           duplicateFrame(index);
                         }}
-                        className="p-1 hover:text-indigo-650 hover:bg-slate-100 rounded transition-all"
+                        className="p-1 hover:text-brand-650 hover:bg-slate-100 rounded transition-all"
                         title="Duplicate frame"
                       >
-                        <Copy className="w-3 h-3 text-indigo-600" />
+                        <Copy className="w-3 h-3 text-brand-600" />
                       </button>
                     </div>
 

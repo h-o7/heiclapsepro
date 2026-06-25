@@ -4,6 +4,22 @@
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Theme Color Variables - Change these hex codes to completely change the app theme color! */
+  --color-brand-50: #f5f3ff;  /* [Ultra-light background] Used for selected tab backgrounds, alert panels, and soft light highlights */
+  --color-brand-100: #e0e7ff; /* [Very-light tint] Used for soft borders, badges, and background highlights */
+  --color-brand-150: #dbeaf8; /* [Muted soft blue-purple] Light borders and badge outline highlights */
+  --color-brand-200: #c7d2fe; /* [Selected state text] Used for light text/sub-text appearing inside active dark purple buttons */
+  --color-brand-300: #a5b4fc; /* [Medium light border] Hover border highlights, focus rings, and soft icons */
+  --color-brand-400: #818cf8; /* [Muted accent color] Muted brand icons, decorative elements, and decorative graphics */
+  --color-brand-500: #6366f1; /* [Hover / active accent] Intermediate primary color, selection backgrounds, and button hover highlights */
+  --color-brand-600: #4f46e5; /* [PRIMARY THEME COLOR] Core main color used for main buttons, primary headers, active tabs, and logo icons */
+  --color-brand-650: #4338ca; /* [Primary accent text] Used for high-contrast primary text, icons, and focus rings */
+  --color-brand-700: #4338ca; /* [Dark primary accent] Darker buttons, primary button hover states, and key highlights */
+  --color-brand-750: #3730a3; /* [Deep primary brand text] Used for contrast headers and rich typography details */
+  --color-brand-800: #3730a3; /* [Dark brand accent] Deep high-contrast background elements and shadow outlines */
+  --color-brand-900: #312e81; /* [Dark branding contrast] Used for high-contrast dark badges and selected button text states */
+  --color-brand-950: #1e1b4b; /* [Near-black dark text] Deepest branding color, used for high-contrast dark text inside light banners */
 }
 
 /* Custom slick inputs for slides styling */

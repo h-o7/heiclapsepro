@@ -1,19 +1,20 @@
 {
   "name": "chronos-pro-studio",
   "private": true,
-  "version": "1.2.0",
+  "version": "1.4.0",
   "type": "module",
-  "main": "electron.js",
+  "main": "electron.bundle.cjs",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
     "build": "vite build",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js dist-electron",
+    "clean": "rm -rf dist server.js dist-electron electron.bundle.cjs",
     "lint": "tsc --noEmit",
-    "electron:start": "electron .",
-    "electron:pack": "npm run build && electron-builder --dir",
-    "electron:dist": "npm run build && electron-builder",
-    "package": "npm run build && electron-builder"
+    "electron:build": "esbuild electron.cjs --bundle --platform=node --external:electron --external:heic-convert --outfile=electron.bundle.cjs",
+    "electron:start": "npm run electron:build && electron .",
+    "electron:pack": "npm run build && npm run electron:build && electron-builder --dir",
+    "electron:dist": "npm run build && npm run electron:build && electron-builder",
+    "package": "npm run build && npm run electron:build && electron-builder"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -50,7 +51,7 @@
     },
     "files": [
       "dist/**/*",
-      "electron.js",
+      "electron.bundle.cjs",
       "preload.cjs",
       "package.json"
     ],
