@@ -321,7 +321,7 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex, c
   // Download finished mp4/webm file
   const downloadVideo = () => {
     if (!finishedVideoBlob) return;
-    const isMp4 = finishedVideoBlob.type.includes('mp4') || exportFormat === 'mp4';
+    const isMp4 = finishedVideoBlob.type.includes('mp4');
     const extension = isMp4 ? 'mp4' : 'webm';
     const rawURL = URL.createObjectURL(finishedVideoBlob);
     
@@ -574,6 +574,24 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex, c
 
         </div>
       </div>
+
+      {/* Info status if video downloaded */}
+      {finishedVideoBlob && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 flex flex-col sm:flex-row items-center justify-between text-xs text-emerald-800 gap-2 shadow-sm animate-in fade-in slide-in-from-top-4 duration-200">
+          <span className="font-bold flex items-center gap-1.5 flex-wrap">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            Master Timelapse Compiled successfully!
+            {exportFormat === 'mp4' && !finishedVideoBlob.type.includes('mp4') && (
+              <span className="text-[10px] text-emerald-600 bg-emerald-100/50 px-1.5 py-0.5 rounded font-normal ml-1">
+                (Firefox fell back to clean WebM due to native MP4 encoder limits)
+              </span>
+            )}
+          </span>
+          <span className="font-mono bg-white px-2 py-0.5 rounded border border-emerald-150 text-emerald-700 font-semibold shadow-sm shrink-0">
+            Size: {formatSize(finishedVideoBlob.size)} • {finishedVideoBlob.type.includes('mp4') ? 'MPEG-4 (MP4)' : 'WebM (WEBM)'}
+          </span>
+        </div>
+      )}
 
       {/* Export Workspace & Settings Card */}
       <div className="bg-white border border-slate-200 rounded-2xl p-6 text-slate-800 space-y-6 shadow-lg">
@@ -845,19 +863,6 @@ export default function PlayerPreview({ frames, currentIndex, setCurrentIndex, c
         )}
 
       </div>
-
-      {/* Info status if video downloaded */}
-      {finishedVideoBlob && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between text-xs text-emerald-800 gap-2 shadow-sm">
-          <span className="font-bold flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            Master Timelapse Compiled successfully!
-          </span>
-          <span className="font-mono bg-white px-2 py-0.5 rounded border border-emerald-150 text-emerald-700 font-semibold shadow-sm">
-            Size: {formatSize(finishedVideoBlob.size)} • {(finishedVideoBlob.type.includes('mp4') || exportFormat === 'mp4') ? 'MPEG-4 Container (MP4)' : 'WebM Container (WEBM)'}
-          </span>
-        </div>
-      )}
 
       {/* Modern Pop Alert Modal for Empty Timeline */}
       {timelineError && (

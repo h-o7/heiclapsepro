@@ -4,6 +4,14 @@ A fully private, browser-sealed tool designed for batch converting HEIC formatte
 
 ---
 
+## 🌐 Live Web Access
+
+You can access and use this application directly in any web browser:
+*   **Shared App (Production Preview)**: [https://ais-pre-pz4f5fpdaioh7lsvccffhl-593733727083.us-east1.run.app](https://ais-pre-pz4f5fpdaioh7lsvccffhl-593733727083.us-east1.run.app)
+*   **Development Sandbox (Live Dev Build)**: [https://ais-dev-pz4f5fpdaioh7lsvccffhl-593733727083.us-east1.run.app](https://ais-dev-pz4f5fpdaioh7lsvccffhl-593733727083.us-east1.run.app)
+
+---
+
 ## 🌟 Key Features
 
 ### 1. HEIC Batch Converter

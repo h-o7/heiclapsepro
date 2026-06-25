@@ -10,10 +10,12 @@ import { TimelineFrame } from '../types';
  */
 export function getSupportedMimeType(): string {
   const types = [
-    'video/webm;codecs=vp9,opus',
-    'video/webm;codecs=vp8,opus',
-    'video/webm',
+    'video/mp4;codecs=avc1',
+    'video/mp4;codecs=h264',
     'video/mp4',
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
+    'video/webm',
   ];
 
   for (const type of types) {
@@ -53,16 +55,25 @@ export function compileVideo({
       return;
     }
 
-    let mimeType = getSupportedMimeType();
+    let mimeType = '';
     if (format === 'mp4') {
-      const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-      if (isSafari && typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('video/mp4')) {
-        mimeType = 'video/mp4';
-      } else {
-        // Fallback to highly-reliable WebM on Chrome/Electron/Firefox (which avoids the 0kb empty blob bug)
+      const mp4Types = [
+        'video/mp4;codecs=avc1',
+        'video/mp4;codecs=h264',
+        'video/mp4',
+      ];
+      for (const t of mp4Types) {
+        if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(t)) {
+          mimeType = t;
+          break;
+        }
+      }
+      
+      // If native MP4 is not supported (e.g. Firefox), fallback to clean video-only WebM
+      if (!mimeType) {
         const webmTypes = [
-          'video/webm;codecs=vp9,opus',
-          'video/webm;codecs=vp8,opus',
+          'video/webm;codecs=vp9',
+          'video/webm;codecs=vp8',
           'video/webm',
         ];
         for (const t of webmTypes) {
@@ -72,10 +83,11 @@ export function compileVideo({
           }
         }
       }
-    } else if (format === 'webm') {
+    } else {
+      // User selected WebM format explicitly
       const webmTypes = [
-        'video/webm;codecs=vp9,opus',
-        'video/webm;codecs=vp8,opus',
+        'video/webm;codecs=vp9',
+        'video/webm;codecs=vp8',
         'video/webm',
       ];
       for (const t of webmTypes) {
@@ -87,7 +99,11 @@ export function compileVideo({
     }
 
     if (!mimeType) {
-      reject(new Error('MediaRecorder is not fully supported in this browser. Please try Chrome, Firefox or Safari.'));
+      mimeType = getSupportedMimeType();
+    }
+
+    if (!mimeType) {
+      reject(new Error('MediaRecorder is not fully supported in this browser. Please try Chrome, Edge, Firefox or Safari.'));
       return;
     }
 
@@ -119,9 +135,8 @@ export function compileVideo({
     };
 
     mediaRecorder.onstop = () => {
-      // If user selected mp4 format, we wrap the blob with video/mp4 MIME type
-      // so downstream download elements and players recognize it seamlessly.
-      const finalMime = format === 'mp4' ? 'video/mp4' : mimeType;
+      // If we recorded a real mp4 stream, use video/mp4. Otherwise, use video/webm.
+      const finalMime = mimeType.startsWith('video/mp4') ? 'video/mp4' : 'video/webm';
       const videoBlob = new Blob(recordedChunks, { type: finalMime });
       resolve(videoBlob);
     };
