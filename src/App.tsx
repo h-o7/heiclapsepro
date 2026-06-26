@@ -5,38 +5,19 @@
 
 import React, { useState } from 'react';
 import { 
-  Film, 
   RefreshCw, 
-  Clock, 
   Github, 
-  HelpCircle,
-  FileImage,
-  Sparkles,
-  Info
+  Info,
+  Terminal,
+  RefreshCw as RefreshIcon
 } from 'lucide-react';
-import PlayerPreview from './components/PlayerPreview';
-import TimelineGrid from './components/TimelineGrid';
 import HEICConverter from './components/HEICConverter';
-import { TimelineFrame, ActiveTab } from './types';
+import WorkLog from './components/WorkLog';
+import { ActiveTab } from './types';
 import packageJson from '../package.json';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('converter');
-  const [frames, setFrames] = useState<TimelineFrame[]>([]);
-  const [currentIndex, setCurrentIndex] = useState<number>(0);
-
-  // Appends converted JPGs straight into the Timelapse timeline
-  const handleAddConvertedToTimelapse = (newFramesFetched: Omit<TimelineFrame, 'id'>[]) => {
-    const formattedFrames: TimelineFrame[] = newFramesFetched.map(f => ({
-      ...f,
-      id: crypto.randomUUID()
-    }));
-
-    setFrames((prev) => [...prev, ...formattedFrames]);
-    
-    // Switch to Timelapse tab automatically so user can watch the result!
-    setActiveTab('timelapse');
-  };
 
   return (
     <div id="app-root" className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans selection:bg-brand-500/20 selection:text-brand-900">
@@ -46,17 +27,17 @@ export default function App() {
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-brand-600 flex items-center justify-center shadow-lg shadow-brand-150">
-              <Film className="w-5 h-5 text-white" />
+              <RefreshCw className="w-5 h-5 text-white animate-spin-slow" />
             </div>
             <div>
               <h1 className="text-base font-bold tracking-tight text-slate-800 flex items-center gap-2">
-                Chronos Pro Studio
+                HEIC Batch Converter Pro
                 <span className="text-[10px] bg-brand-50 text-brand-600 font-mono font-bold px-2 py-0.5 rounded border border-brand-100">
                   v{packageJson.version}
                 </span>
               </h1>
               <p className="text-[11px] text-slate-400 font-medium">
-                HEIC folder transcoder and premium browser timelapse builder
+                High-performance offline batch image converter & resizer
               </p>
             </div>
           </div>
@@ -71,29 +52,20 @@ export default function App() {
                   : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
               }`}
             >
-              <RefreshCw className="w-3.5 h-3.5" />
+              <RefreshIcon className="w-3.5 h-3.5" />
               <span>HEIC Batch Converter</span>
             </button>
 
             <button
-              onClick={() => setActiveTab('timelapse')}
+              onClick={() => setActiveTab('worklog')}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold tracking-wide transition-all cursor-pointer ${
-                activeTab === 'timelapse'
+                activeTab === 'worklog'
                   ? 'bg-brand-600 text-white shadow-md shadow-brand-200'
                   : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
               }`}
             >
-              <Film className="w-3.5 h-3.5" />
-              <span>Timelapse Pro</span>
-              {frames.length > 0 && (
-                <span className={`px-1.5 py-0.5 font-mono text-[9px] rounded font-bold ${
-                  activeTab === 'timelapse' 
-                    ? 'bg-brand-900/20 text-brand-100' 
-                    : 'bg-slate-200 text-slate-500'
-                }`}>
-                  {frames.length}
-                </span>
-              )}
+              <Terminal className="w-3.5 h-3.5" />
+              <span>Work Log</span>
             </button>
           </div>
         </div>
@@ -101,56 +73,42 @@ export default function App() {
 
       {/* Main Sandbox Workspace Stage */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
-        {activeTab === 'timelapse' ? (
-          /* SECTION 1: Interlocking Time lapse workspace */
-          <div className="grid grid-cols-1 gap-6">
-            
-            {/* Player preview frame container */}
-            <PlayerPreview 
-              frames={frames} 
-              currentIndex={currentIndex} 
-              setCurrentIndex={setCurrentIndex} 
-            >
-              {/* Sequence list storyboard container */}
-              <TimelineGrid 
-                frames={frames} 
-                setFrames={setFrames} 
-                currentIndex={currentIndex} 
-                setCurrentIndex={setCurrentIndex} 
-              />
-            </PlayerPreview>
-
+        {activeTab === 'converter' && (
+          /* SECTION 1: Decoupled HEIC to JPG Batch transcoder */
+          <div className="animate-fade-in">
+            <HEICConverter />
           </div>
-        ) : (
-          /* SECTION 2: Decoupled HEIC to JPG Batch transcoder */
-          <HEICConverter 
-            onAddToTimelapse={handleAddConvertedToTimelapse}
-            timelapseFrameCount={frames.length}
-          />
+        )}
+
+        {activeTab === 'worklog' && (
+          /* SECTION 2: Detailed Telemetry Transcode Work Log */
+          <div className="animate-fade-in">
+            <WorkLog />
+          </div>
         )}
       </main>
 
       {/* Trust & Privacy Guard footer */}
-      <footer className="border-t border-slate-200 bg-white py-10 px-6 mt-12 shadow-inner">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="flex items-center gap-3">
-            <Info className="w-5 h-5 text-slate-400" />
-            <p className="text-[11px] text-slate-500 leading-relaxed max-w-xl">
-              <strong className="text-slate-700">100% Browser Sealed Privacy Guarantee:</strong> No images or metadata details are processed on external servers. All custom HEIC transcodes, aspect orientations, storyboard timelines, and video compiles are run completely locally inside browser storage context via high performance web workers, safeguarding original quality and bandwidth.
+      <footer className="border-t border-slate-200/60 bg-slate-50/40 py-6 px-6 mt-8">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <Info className="w-4 h-4 text-slate-400 shrink-0" />
+            <p className="text-[10px] text-slate-400 leading-normal max-w-2xl">
+              <strong className="text-slate-500 font-semibold">100% Browser Sealed Privacy Guarantee:</strong> No images or metadata details are processed on external servers. All custom HEIC transcodes, aspect orientations, and image resizing operations are run completely locally inside browser storage context via high performance WebAssembly decoders and canvas context, safeguarding original quality and bandwidth.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-4 text-xs font-mono text-slate-400">
+          <div className="flex flex-wrap items-center gap-3.5 text-[10px] font-mono text-slate-400">
             <span>Powered by heic2any & JSZip</span>
             <span>•</span>
             <a 
               href="https://github.com/h-o7/heiclapsepro" 
               target="_blank" 
               rel="noopener noreferrer" 
-              className="text-brand-600 hover:text-brand-700 hover:underline flex items-center gap-1.5 font-bold transition-colors cursor-pointer"
+              className="text-brand-500 hover:text-brand-600 hover:underline flex items-center gap-1.5 font-bold transition-colors cursor-pointer"
               title="Need 10-bit HDR HEIC conversion? Get the Electron Desktop App from GitHub!"
             >
-              <Github className="w-3.5 h-3.5 text-brand-500" />
-              <span>Chronos Pro Studio Github</span>
+              <Github className="w-3 h-3 text-brand-500" />
+              <span>HEIC Batch Converter Github</span>
             </a>
             <span>•</span>
             <span>Google AI Studio Applet</span>

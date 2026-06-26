@@ -1,6 +1,6 @@
 {
-  "name": "Timelapse & HEIC Converter",
-  "description": "Create stunning photo timelapses and batch convert Samsung HEIC photos to high-quality JPGs directly in your browser.",
+  "name": "HEIC Batch Converter Pro",
+  "description": "Highly optimized browser-sealed batch converter and resizer for Samsung & iPhone HEIC/HEIF images and standard formats.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

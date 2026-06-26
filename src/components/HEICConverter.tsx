@@ -21,15 +21,11 @@ import {
   Folder
 } from 'lucide-react';
 import JSZip from 'jszip';
-import { HEICFile, TimelineFrame } from '../types';
+import { HEICFile } from '../types';
 import { convertHEICtoJPG, getImageDimensions, resizeImage } from '../utils/heic';
+import { logger } from '../utils/logger';
 
-interface HEICConverterProps {
-  onAddToTimelapse: (frames: Omit<TimelineFrame, 'id'>[]) => void;
-  timelapseFrameCount: number;
-}
-
-export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }: HEICConverterProps) {
+export default function HEICConverter() {
   const [files, setFiles] = useState<HEICFile[]>([]);
   const [quality, setQuality] = useState<number>(0.85);
   const [isConvertingAll, setIsConvertingAll] = useState<boolean>(false);
@@ -52,6 +48,7 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
   const processUploadedFiles = (rawFiles: FileList | null) => {
     if (!rawFiles) return;
 
+    logger.info('converter', `Uploaded ${rawFiles.length} files to batch queue.`);
     const newHeicFiles: HEICFile[] = [];
     for (let i = 0; i < rawFiles.length; i++) {
       const file = rawFiles[i];
@@ -59,6 +56,7 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
       
       // We target HEIC / HEIF format primarily, but let the user load anything
       const isHeic = nameLower.endsWith('.heic') || nameLower.endsWith('.heif');
+      logger.info('converter', `Queued [File ${i + 1}/${rawFiles.length}] Name: "${file.name}" | Size: ${(file.size / 1024).toFixed(1)} KB | Format: ${isHeic ? 'HEIC/HEIF Image' : 'Standard/Other Image'}`);
       
       // Create new HEIC item
       newHeicFiles.push({
@@ -99,6 +97,8 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
     const targetFile = files.find((f) => f.id === id);
     if (!targetFile) return;
 
+    logger.info('converter', `Starting transcode for file: "${targetFile.name}" (Original size: ${(targetFile.size / 1024).toFixed(1)} KB)`);
+
     // Update status
     setFiles((prev) =>
       prev.map((f) =>
@@ -116,11 +116,14 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
       let convertedBlob: Blob;
 
       if (isHeic) {
+        logger.info('converter', `[${targetFile.name}] Parsing HEIC/HEIF container. Decoding pixel bitstream...`);
         // Step 1: Decode HEIC to JPG
         convertedBlob = await convertHEICtoJPG(targetBlob, customQuality ?? quality);
+        logger.info('converter', `[${targetFile.name}] Decoded HEIC successfully. Sub-sampling quality set to ${(customQuality ?? quality) * 100}%`);
         
         // Step 2: Resize if enabled
         if (resizeEnabled && resizeWidth > 0 && resizeHeight > 0) {
+          logger.info('converter', `[${targetFile.name}] Resize filter active. Fitting into bounding box: ${resizeWidth}x${resizeHeight}px (${resizeModeFit ? 'Letterbox/Contain' : 'Stretch/Fill'})`);
           convertedBlob = await resizeImage(
             convertedBlob,
             resizeWidth,
@@ -132,7 +135,9 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
       } else {
         // For non-HEIC / standard format files (JPG, PNG, WEBP, BMP, etc.):
         // We ALWAYS transcode standard images to JPEG (applying custom quality and/or resizing)
+        logger.info('converter', `[${targetFile.name}] Loading standard web image format. Re-transcoding to baseline JPG container...`);
         if (resizeEnabled && resizeWidth > 0 && resizeHeight > 0) {
+          logger.info('converter', `[${targetFile.name}] Resize filter active. Fitting standard image to bounding box: ${resizeWidth}x${resizeHeight}px`);
           convertedBlob = await resizeImage(
             targetBlob,
             resizeWidth,
@@ -142,6 +147,7 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
           );
         } else {
           // If resizing is disabled, transcode using natural/original size to compress to JPG with chosen quality
+          logger.info('converter', `[${targetFile.name}] Compressing image using original dimensions.`);
           convertedBlob = await resizeImage(
             targetBlob,
             99999, // large upper bound
@@ -153,6 +159,7 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
       }
 
       const convertedUrl = URL.createObjectURL(convertedBlob);
+      logger.success('converter', `[${targetFile.name}] Transcoded successfully. Output size: ${(convertedBlob.size / 1024).toFixed(1)} KB (Compression ratio: ${((convertedBlob.size / targetFile.size) * 100).toFixed(1)}%)`);
 
       setFiles((prev) =>
         prev.map((f) =>
@@ -168,13 +175,15 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
         )
       );
     } catch (err: any) {
+      const errorMsg = err.message || 'Error converting HEIC image';
+      logger.error('converter', `[${targetFile.name}] Transcode failed: ${errorMsg}`);
       setFiles((prev) =>
         prev.map((f) =>
           f.id === id
             ? {
                 ...f,
                 status: 'error',
-                errorMsg: err.message || 'Error converting HEIC image',
+                errorMsg,
                 progress: 0,
               }
             : f
@@ -188,6 +197,7 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
     const pendingFiles = files.filter((f) => f.status === 'pending' || f.status === 'error');
     if (pendingFiles.length === 0) return;
 
+    logger.info('converter', `Initiating sequential batch conversion for ${pendingFiles.length} images...`);
     setIsConvertingAll(true);
     let count = 0;
 
@@ -200,6 +210,7 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
       }
     }
 
+    logger.success('converter', `Sequential batch conversion completed. Transcoded ${count} photos successfully.`);
     setIsConvertingAll(false);
   };
 
@@ -355,36 +366,6 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
     } finally {
       setIsSavingToFolder(false);
     }
-  };
-
-  // Pipeline converted images to the Timelapse Timeline
-  const sendToTimelapse = async () => {
-    const successfulFiles = files.filter((f) => f.status === 'done' && f.convertedBlob && f.convertedUrl);
-    if (successfulFiles.length === 0) return;
-
-    const framesToInject: Omit<TimelineFrame, 'id'>[] = [];
-
-    for (const f of successfulFiles) {
-      if (f.convertedBlob && f.convertedUrl) {
-        const dimensions = await getImageDimensions(f.convertedUrl);
-        framesToInject.push({
-          name: f.name.replace(/\.[^.]+$/, '') + '.jpg',
-          size: f.convertedBlob.size,
-          url: f.convertedUrl,
-          blob: f.convertedBlob,
-          width: dimensions.width,
-          height: dimensions.height,
-          rotation: 0,
-          flipped: false,
-          aspectRatio: dimensions.width / dimensions.height,
-        });
-      }
-    }
-
-    onAddToTimelapse(framesToInject);
-    
-    // Nice notifications
-    alert(`Successfully transferred ${framesToInject.length} converted JPG photos to your Timelapse timeline!`);
   };
 
   // Clear file lists and revoke object URLs
@@ -628,36 +609,25 @@ export default function HEICConverter({ onAddToTimelapse, timelapseFrameCount }:
             )}
           </div>
 
-          {/* Operations stack - Side-by-side Grids */}
-          <div className="space-y-2 pt-3 border-t border-slate-100">
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={handleConvertAll}
-                disabled={isConvertingAll || files.length === 0 || pendingCount === 0}
-                className="py-2 px-3 bg-brand-600 border border-transparent hover:border-brand-200 hover:bg-brand-50 hover:text-black disabled:bg-slate-100 disabled:text-slate-400 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm disabled:shadow-none disabled:hover:border-transparent group"
-              >
-                {isConvertingAll ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin text-white flex-shrink-0 group-hover:text-black" />
-                    <span className="truncate">Conv. ({conversionIndex}/{files.length})</span>
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-3.5 h-3.5 text-white fill-current flex-shrink-0 group-hover:text-black group-hover:fill-black" />
-                    <span className="truncate">Convert to JPG</span>
-                  </>
-                )}
-              </button>
-
-              <button
-                onClick={sendToTimelapse}
-                disabled={convertedCount === 0 || isConvertingAll}
-                className="py-2 px-3 bg-brand-600 border border-transparent hover:border-brand-200 hover:bg-brand-50 hover:text-black disabled:bg-slate-100 disabled:text-slate-400 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-sm disabled:shadow-none disabled:hover:border-transparent group"
-              >
-                <ArrowRight className="w-3.5 h-3.5 flex-shrink-0 text-white group-hover:text-black" />
-                <span className="truncate flex-1 text-center">Import to Timeline</span>
-              </button>
-            </div>
+          {/* Operations stack */}
+          <div className="space-y-2.5 pt-3 border-t border-slate-100">
+            <button
+              onClick={handleConvertAll}
+              disabled={isConvertingAll || files.length === 0 || pendingCount === 0}
+              className="w-full py-2.5 px-3 bg-brand-600 border border-transparent hover:border-brand-200 hover:bg-brand-50 hover:text-black disabled:bg-slate-100 disabled:text-slate-400 text-white rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md disabled:shadow-none disabled:hover:border-transparent group"
+            >
+              {isConvertingAll ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-white flex-shrink-0 group-hover:text-black" />
+                  <span className="truncate">Converting ({conversionIndex}/{files.length})</span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-3.5 h-3.5 text-white fill-current flex-shrink-0 group-hover:text-black group-hover:fill-black" />
+                  <span className="truncate font-bold">Start Batch Conversion</span>
+                </>
+              )}
+            </button>
 
             <div className="grid grid-cols-2 gap-2">
               <button
