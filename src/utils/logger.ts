@@ -18,7 +18,7 @@ class AppLogger {
   private listeners: Set<LogListener> = new Set();
 
   constructor() {
-    this.info('system', 'Chronos Pro Studio Engine initialized.');
+    this.info('system', 'HEIC Batch Converter Pro Engine initialized.');
     this.info('system', `Browser Platform: ${navigator.platform || 'Unknown'}`);
     this.info('system', `User Agent: ${navigator.userAgent}`);
     

@@ -91,7 +91,7 @@ function createWindow() {
     height: 800,
     minWidth: 1024,
     minHeight: 768,
-    title: "Chronos Pro Studio",
+    title: "HEIC Batch Converter Pro",
     backgroundColor: "#f8fafc",
     webPreferences: {
       nodeIntegration: false,

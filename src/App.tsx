@@ -101,7 +101,7 @@ export default function App() {
             <span>Powered by heic2any & JSZip</span>
             <span>•</span>
             <a 
-              href="https://github.com/h-o7/heiclapsepro" 
+              href="https://github.com/h-o7/HEICBatchConverter" 
               target="_blank" 
               rel="noopener noreferrer" 
               className="text-brand-500 hover:text-brand-600 hover:underline flex items-center gap-1.5 font-bold transition-colors cursor-pointer"

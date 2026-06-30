@@ -1,5 +1,5 @@
 {
-  "name": "chronos-pro-studio",
+  "name": "heic-batch-converter-pro",
   "private": true,
   "version": "1.4.0",
   "type": "module",
@@ -44,8 +44,8 @@
     "vite": "^6.2.3"
   },
   "build": {
-    "appId": "com.chronos.pro",
-    "productName": "Chronos Pro Studio",
+    "appId": "com.heicbatchconverter.pro",
+    "productName": "HEIC Batch Converter Pro",
     "win": {
       "target": "nsis"
     },
